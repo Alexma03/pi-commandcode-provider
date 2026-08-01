@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Allow pi to start when the model list fetch fails due to no network connectivity. Command Code models are fetched live when online; if the provider starts offline, run `/reload` once connected to refresh the model catalog.
+- Allow pi to start when model discovery is unavailable. The provider now caches the last successfully fetched model catalog so previously discovered Command Code models remain selectable offline; a first offline start without a cache keeps Command Code unavailable until `/reload` succeeds.
 
 ### Contributors
 

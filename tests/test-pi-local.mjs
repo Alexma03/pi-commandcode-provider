@@ -6,24 +6,16 @@
 
 import assert from "node:assert/strict"
 import { spawn, spawnSync } from "node:child_process"
-import {
-  accessSync,
-  constants,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs"
+import { accessSync, constants, mkdtempSync, rmSync } from "node:fs"
 import { createServer } from "node:http"
-import { homedir, tmpdir } from "node:os"
+import { tmpdir } from "node:os"
 import { delimiter, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PROJECT_DIR = resolve(__dirname, "..")
 const EXT_PATH = resolve(PROJECT_DIR, "index.ts")
-const TEST_MODEL = "deepseek/deepseek-v4-flash"
+const TEST_MODEL = "cc-offline-cache-model"
 
 function findPiBinary() {
   if (process.env.PI_BIN) return process.env.PI_BIN
@@ -77,7 +69,7 @@ const server = createServer((req, res) => {
             context_length: 1_000_000,
           },
           {
-            id: "Qwen/Qwen3.7-Max",
+            id: "cc-second-model",
             object: "model",
             created: 1779824324,
             owned_by: "command-code",
@@ -132,32 +124,15 @@ const address = server.address()
 const port = typeof address === "object" && address ? address.port : 0
 const apiBase = `http://127.0.0.1:${port}`
 
-function hasLivePiAuth() {
-  return (
-    !!process.env.COMMANDCODE_API_KEY ||
-    existsSync(join(homedir(), ".commandcode", "auth.json")) ||
-    existsSync(join(homedir(), ".omp", "agent", "auth.json")) ||
-    existsSync(join(homedir(), ".pi", "agent", "auth.json"))
-  )
-}
-
-let tempHome
+const tempHome = mkdtempSync(join(tmpdir(), "pi-cc-home-"))
 const env = {
   ...process.env,
+  HOME: tempHome,
+  USERPROFILE: tempHome,
   COMMANDCODE_API_BASE: apiBase,
+  COMMANDCODE_API_KEY: "mock-key",
   COMMANDCODE_MODELS_URL: `${apiBase}/provider/v1/models`,
-}
-
-if (hasLivePiAuth()) {
-  console.log("[pi-local] using live pi auth")
-} else {
-  console.log("[pi-local] live pi auth not found; using mock auth fallback")
-  tempHome = mkdtempSync(join(tmpdir(), "pi-cc-home-"))
-  mkdirSync(join(tempHome, ".commandcode"), { recursive: true })
-  writeFileSync(join(tempHome, ".commandcode", "auth.json"), JSON.stringify({ apiKey: "mock-key" }))
-  env.HOME = tempHome
-  env.USERPROFILE = tempHome
-  env.COMMANDCODE_API_KEY = "mock-key"
+  COMMANDCODE_MODELS_CACHE: join(tempHome, "commandcode-models.json"),
 }
 
 function runPi(args, timeoutMs = 30_000) {
@@ -291,15 +266,63 @@ async function runRpcQuery(timeoutMs = 30_000) {
 }
 
 try {
+  console.log("[pi-local] first offline start without a cache")
+  const onlineModelsUrl = env.COMMANDCODE_MODELS_URL
+  env.COMMANDCODE_MODELS_URL = "http://127.0.0.1:1/provider/v1/models"
+  rmSync(env.COMMANDCODE_MODELS_CACHE, { force: true })
+  const firstOfflineList = await runPi(
+    ["--no-extensions", "-e", EXT_PATH, "--list-models", "commandcode"],
+    20_000,
+  )
+  assert.equal(firstOfflineList.code, 0, firstOfflineList.stderr)
+  assert.doesNotMatch(firstOfflineList.stderr, /Failed to load extension/)
+  assert.match(firstOfflineList.stdout || firstOfflineList.stderr, /No models matching/)
+  assert.match(firstOfflineList.stderr, /no valid cached catalog/)
+  env.COMMANDCODE_MODELS_URL = onlineModelsUrl
+
   console.log("[pi-local] list models through real extension")
   modelListRequestCount = 0
   const list = await runPi(["--no-extensions", "-e", EXT_PATH, "--list-models"], 20_000)
   assert.equal(list.code, 0, list.stderr)
   const listOutput = list.stdout || list.stderr
   assert.match(listOutput, /commandcode/)
-  assert.match(listOutput, /deepseek\/deepseek-v4-flash/)
-  assert.match(listOutput, /Qwen\/Qwen3\.7-Max/)
+  assert.match(listOutput, /cc-offline-cache-model/)
+  assert.match(listOutput, /cc-second-model/)
   assert.equal(modelListRequestCount, 1)
+
+  console.log("[pi-local] list cached models while model discovery is offline")
+  env.COMMANDCODE_MODELS_URL = "http://127.0.0.1:1/provider/v1/models"
+  const offlineList = await runPi(
+    ["--no-extensions", "-e", EXT_PATH, "--list-models", "commandcode"],
+    20_000,
+  )
+  assert.equal(offlineList.code, 0, offlineList.stderr)
+  const offlineListOutput = offlineList.stdout || offlineList.stderr
+  assert.match(offlineListOutput, /cc-offline-cache-model/)
+  assert.match(offlineListOutput, /cc-second-model/)
+  assert.match(offlineList.stderr, /Using the cached catalog/)
+
+  console.log("[pi-local] use a cached model while model discovery is offline")
+  requestCount = 0
+  const offlinePrint = await runPi(
+    [
+      "--no-extensions",
+      "-e",
+      EXT_PATH,
+      "-p",
+      "say mock token",
+      "--provider",
+      "commandcode",
+      "--model",
+      TEST_MODEL,
+    ],
+    30_000,
+  )
+  assert.equal(offlinePrint.code, 0, offlinePrint.stderr)
+  assert.match(offlinePrint.stdout, /mock-pi-ok/)
+  assert.match(offlinePrint.stderr, /Using the cached catalog/)
+  assert.equal(requestCount, 1)
+  env.COMMANDCODE_MODELS_URL = onlineModelsUrl
 
   console.log("[pi-local] print mode through real extension and mock API")
   requestCount = 0
@@ -347,5 +370,5 @@ try {
   console.log("[pi-local] PASS")
 } finally {
   await new Promise((resolve) => server.close(resolve))
-  if (tempHome) rmSync(tempHome, { recursive: true, force: true })
+  rmSync(tempHome, { recursive: true, force: true })
 }
