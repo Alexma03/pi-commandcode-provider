@@ -1,6 +1,5 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname } from "node:path"
 
 export const DEFAULT_MODELS_URL = "https://api.commandcode.ai/provider/v1/models"
 
@@ -27,7 +26,7 @@ interface FetchCommandCodeModelsOptions {
 }
 
 interface LoadCommandCodeModelsOptions extends FetchCommandCodeModelsOptions {
-  cachePath?: string
+  cachePath: string
 }
 
 export interface LoadCommandCodeModelsResult {
@@ -91,10 +90,6 @@ function requireModels(models: readonly CommandCodeModel[]): readonly CommandCod
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-export function defaultCommandCodeModelsCachePath(): string {
-  return join(homedir(), ".commandcode", "pi-models.json")
 }
 
 export function commandCodeModelsFromApiResponse(value: unknown): readonly CommandCodeModel[] {
@@ -174,9 +169,9 @@ async function writeCommandCodeModelsCache(
 }
 
 export async function loadCommandCodeModels(
-  options: LoadCommandCodeModelsOptions = {},
+  options: LoadCommandCodeModelsOptions,
 ): Promise<LoadCommandCodeModelsResult> {
-  const cachePath = options.cachePath ?? defaultCommandCodeModelsCachePath()
+  const cachePath = options.cachePath
 
   try {
     const models = await fetchCommandCodeModels(options)

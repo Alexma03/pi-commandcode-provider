@@ -13,7 +13,8 @@
  */
 
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai"
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
+import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent"
+import { join } from "node:path"
 
 import { COMMAND_CODE_CLI_VERSION, createStreamCommandCode, DEFAULT_API_BASE } from "./src/core.ts"
 import { calculateCommandCodeCost } from "./src/cost.ts"
@@ -22,7 +23,8 @@ import { getApiKey, login, refreshToken } from "./src/oauth.ts"
 
 const API_BASE = process.env.COMMANDCODE_API_BASE ?? DEFAULT_API_BASE
 const MODELS_URL = process.env.COMMANDCODE_MODELS_URL ?? DEFAULT_MODELS_URL
-const MODELS_CACHE_PATH = process.env.COMMANDCODE_MODELS_CACHE
+const MODELS_CACHE_PATH =
+  process.env.COMMANDCODE_MODELS_CACHE ?? join(getAgentDir(), "commandcode-models.json")
 
 type CommandCodeModelCost = {
   input: number

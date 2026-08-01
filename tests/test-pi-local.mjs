@@ -129,10 +129,10 @@ const env = {
   ...process.env,
   HOME: tempHome,
   USERPROFILE: tempHome,
+  PI_CODING_AGENT_DIR: join(tempHome, "custom-pi-agent"),
   COMMANDCODE_API_BASE: apiBase,
   COMMANDCODE_API_KEY: "mock-key",
   COMMANDCODE_MODELS_URL: `${apiBase}/provider/v1/models`,
-  COMMANDCODE_MODELS_CACHE: join(tempHome, "commandcode-models.json"),
 }
 
 function runPi(args, timeoutMs = 30_000) {
@@ -269,7 +269,8 @@ try {
   console.log("[pi-local] first offline start without a cache")
   const onlineModelsUrl = env.COMMANDCODE_MODELS_URL
   env.COMMANDCODE_MODELS_URL = "http://127.0.0.1:1/provider/v1/models"
-  rmSync(env.COMMANDCODE_MODELS_CACHE, { force: true })
+  const modelsCachePath = join(env.PI_CODING_AGENT_DIR, "commandcode-models.json")
+  rmSync(modelsCachePath, { force: true })
   const firstOfflineList = await runPi(
     ["--no-extensions", "-e", EXT_PATH, "--list-models", "commandcode"],
     20_000,
@@ -289,6 +290,7 @@ try {
   assert.match(listOutput, /cc-offline-cache-model/)
   assert.match(listOutput, /cc-second-model/)
   assert.equal(modelListRequestCount, 1)
+  assert.doesNotThrow(() => accessSync(modelsCachePath, constants.R_OK))
 
   console.log("[pi-local] list cached models while model discovery is offline")
   env.COMMANDCODE_MODELS_URL = "http://127.0.0.1:1/provider/v1/models"
