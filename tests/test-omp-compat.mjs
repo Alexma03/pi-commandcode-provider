@@ -166,6 +166,9 @@ try {
   assert.match(listOutput, /commandcode/)
   assert.match(listOutput, /deepseek\/deepseek-v4-flash/)
   assert.equal(modelListRequestCount, 1)
+  assert.doesNotThrow(() =>
+    accessSync(join(tempHome, ".omp", "agent", "commandcode-models.json"), constants.R_OK),
+  )
   assert.doesNotMatch(result.stdout + result.stderr, /Failed to load extension/)
 
   console.log("[omp-compat] print mode through real extension and mock API")

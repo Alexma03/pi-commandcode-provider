@@ -134,7 +134,9 @@ On startup, the provider fetches:
 https://api.commandcode.ai/provider/v1/models
 ```
 
-For tests or local mocks, override it with `COMMANDCODE_MODELS_URL`.
+The last successfully fetched catalog is cached at `<agent-dir>/commandcode-models.json` (`~/.pi/agent/commandcode-models.json` by default). The agent directory follows pi's `PI_CODING_AGENT_DIR` setting, so compatible hosts such as OMP keep the cache in their own agent directory. If model discovery is temporarily unavailable, the provider uses this cached catalog so previously discovered Command Code models remain selectable. On a first offline start without a cache, pi still loads, but Command Code models remain unavailable until the connection is restored and `/reload` succeeds.
+
+For tests or local mocks, override the endpoint with `COMMANDCODE_MODELS_URL` and the cache file with `COMMANDCODE_MODELS_CACHE`.
 
 ## Pricing
 

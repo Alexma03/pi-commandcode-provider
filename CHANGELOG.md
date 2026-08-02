@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Allow pi to start when model discovery is unavailable. The provider now caches the last successfully fetched model catalog so previously discovered Command Code models remain selectable offline; a first offline start without a cache keeps Command Code unavailable until `/reload` succeeds.
+
+### Contributors
+
+- @k3-2o — reported that the model-list fetch blocked pi startup when offline.
+
 ## 0.4.2 - 2026-07-05
 
 - Fix Oh My Pi extension validation by avoiding the missing `calculateCost` export from OMP's legacy `pi-ai` shim.
