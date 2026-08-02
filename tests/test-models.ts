@@ -136,6 +136,29 @@ describe("loadCommandCodeModels()", () => {
     })
   })
 
+  it("recovers live models after an empty offline start", async () => {
+    await withTemporaryCache(async ({ cachePath }) => {
+      const empty = await loadCommandCodeModels({
+        cachePath,
+        fetchImpl: failingFetch(),
+      })
+
+      assert.equal(empty.source, "empty")
+      assert.deepEqual(empty.models, [])
+
+      const recovered = await loadCommandCodeModels({
+        cachePath,
+        fetchImpl: successfulFetch(),
+      })
+
+      assert.deepEqual(recovered, { models: EXPECTED_MODELS, source: "live" })
+      assert.deepEqual(
+        commandCodeModelsFromCache(JSON.parse(await readFile(cachePath, "utf-8"))),
+        EXPECTED_MODELS,
+      )
+    })
+  })
+
   it("ignores a corrupt cache after a failed refresh", async () => {
     await withTemporaryCache(async ({ cachePath }) => {
       await writeFile(cachePath, "not json", "utf-8")

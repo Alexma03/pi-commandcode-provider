@@ -279,7 +279,25 @@ try {
   assert.doesNotMatch(firstOfflineList.stderr, /Failed to load extension/)
   assert.match(firstOfflineList.stdout || firstOfflineList.stderr, /No models matching/)
   assert.match(firstOfflineList.stderr, /no valid cached catalog/)
+  assert.match(firstOfflineList.stderr, /until \/reload succeeds/)
+  assert.throws(() => accessSync(modelsCachePath, constants.R_OK), /ENOENT|no such file/i)
+
+  // A fresh process re-runs the extension entrypoint, which is the same path /reload uses.
+  console.log("[pi-local] recover models after empty offline start")
   env.COMMANDCODE_MODELS_URL = onlineModelsUrl
+  modelListRequestCount = 0
+  const recoveryList = await runPi(
+    ["--no-extensions", "-e", EXT_PATH, "--list-models", "commandcode"],
+    20_000,
+  )
+  assert.equal(recoveryList.code, 0, recoveryList.stderr)
+  const recoveryOutput = recoveryList.stdout || recoveryList.stderr
+  assert.match(recoveryOutput, /cc-offline-cache-model/)
+  assert.match(recoveryOutput, /cc-second-model/)
+  assert.doesNotMatch(recoveryList.stderr, /no valid cached catalog/)
+  assert.doesNotMatch(recoveryList.stderr, /Failed to load extension/)
+  assert.equal(modelListRequestCount, 1)
+  assert.doesNotThrow(() => accessSync(modelsCachePath, constants.R_OK))
 
   console.log("[pi-local] list models through real extension")
   modelListRequestCount = 0
