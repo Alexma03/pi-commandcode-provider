@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4 - 2026-08-03
+
+- Fix cached input tokens being counted twice.
+
 ## 0.4.3 - 2026-08-02
 
 - Allow pi to start when model discovery is unavailable. The provider now caches the last successfully fetched model catalog so previously discovered Command Code models remain selectable offline; a first offline start without a cache keeps Command Code unavailable until `/reload` succeeds.

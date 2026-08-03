@@ -102,9 +102,9 @@ describe("streamCommandCode — successful streams", () => {
           type: "finish",
           finishReason: "stop",
           totalUsage: {
-            inputTokens: 5,
-            outputTokens: 2,
-            inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 1 },
+            inputTokens: 3124,
+            outputTokens: 15,
+            inputTokenDetails: { noCacheTokens: 52, cacheReadTokens: 3072 },
           },
         }),
       ],
@@ -134,7 +134,10 @@ describe("streamCommandCode — successful streams", () => {
       done.message.content[0]?.type === "text" ? done.message.content[0].text : "",
       "Hello",
     )
-    assert.equal(done.message.usage.totalTokens, 11)
+    assert.equal(done.message.usage.input, 52)
+    assert.equal(done.message.usage.cacheRead, 3072)
+    assert.equal(done.message.usage.cacheWrite, 0)
+    assert.equal(done.message.usage.totalTokens, 3139)
     assert.equal(calculatedUsages.length, 1)
   })
 

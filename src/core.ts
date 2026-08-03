@@ -388,10 +388,14 @@ export function createStreamCommandCode(deps: CoreDependencies) {
             const usage = commandCodeUsage(event)
             if (usage) {
               const details = commandCodeInputTokenDetails(usage)
-              output.usage.input = numberValue(usage.inputTokens) ?? 0
+              const totalInput = numberValue(usage.inputTokens) ?? 0
+              const input = numberValue(details?.noCacheTokens)
+              const cacheRead = numberValue(details?.cacheReadTokens) ?? 0
+              const cacheWrite = numberValue(details?.cacheWriteTokens) ?? 0
+              output.usage.input = input ?? Math.max(0, totalInput - cacheRead - cacheWrite)
               output.usage.output = numberValue(usage.outputTokens) ?? 0
-              output.usage.cacheRead = numberValue(details?.cacheReadTokens) ?? 0
-              output.usage.cacheWrite = numberValue(details?.cacheWriteTokens) ?? 0
+              output.usage.cacheRead = cacheRead
+              output.usage.cacheWrite = cacheWrite
               output.usage.totalTokens =
                 output.usage.input +
                 output.usage.output +
