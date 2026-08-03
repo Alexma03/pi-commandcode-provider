@@ -141,6 +141,70 @@ describe("streamCommandCode — successful streams", () => {
     assert.equal(calculatedUsages.length, 1)
   })
 
+  it("derives uncached input when noCacheTokens is missing", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [
+        JSON.stringify({
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: {
+            inputTokens: 100,
+            outputTokens: 10,
+            inputTokenDetails: { cacheReadTokens: 75 },
+          },
+        }),
+      ],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), { apiKey: "mock-key" }),
+    )
+
+    const done = events.at(-1)
+    assert.equal(done?.type, "done")
+    if (done?.type !== "done") throw new Error("expected done")
+    assert.equal(done.message.usage.input, 25)
+    assert.equal(done.message.usage.cacheRead, 75)
+    assert.equal(done.message.usage.cacheWrite, 0)
+    assert.equal(done.message.usage.totalTokens, 110)
+  })
+
+  it("accounts for cache writes separately from uncached input", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [
+        JSON.stringify({
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: {
+            inputTokens: 100,
+            outputTokens: 10,
+            inputTokenDetails: {
+              noCacheTokens: 20,
+              cacheReadTokens: 70,
+              cacheWriteTokens: 10,
+            },
+          },
+        }),
+      ],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), { apiKey: "mock-key" }),
+    )
+
+    const done = events.at(-1)
+    assert.equal(done?.type, "done")
+    if (done?.type !== "done") throw new Error("expected done")
+    assert.equal(done.message.usage.input, 20)
+    assert.equal(done.message.usage.cacheRead, 70)
+    assert.equal(done.message.usage.cacheWrite, 10)
+    assert.equal(done.message.usage.totalTokens, 110)
+  })
+
   it("ends on finish without waiting for an open upstream connection", async () => {
     server.mockResponse({
       type: "success",
