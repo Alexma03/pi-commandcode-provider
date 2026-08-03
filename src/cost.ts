@@ -13,7 +13,7 @@ export function calculateCommandCodeCost(model: ModelLike, usage: Usage): void {
   usage.cost.input = (model.cost.input / 1_000_000) * usage.input
   usage.cost.output = (model.cost.output / 1_000_000) * usage.output
   usage.cost.cacheRead = (model.cost.cacheRead / 1_000_000) * usage.cacheRead
-  usage.cost.cacheWrite = (model.cost.cacheWrite / 1_000_000) * usage.cacheWrite
+  usage.cost.cacheWrite = (model.cost.cacheWrite * usage.cacheWrite) / 1_000_000
   usage.cost.total =
     usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite
 }

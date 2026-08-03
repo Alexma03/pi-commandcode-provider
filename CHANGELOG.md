@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Use the host-provided `pi-ai` and `pi-coding-agent` core packages instead of installing a private pinned `pi-ai` runtime copy.
+
 ## 0.4.4 - 2026-08-03
 
 - Fix cached input tokens being counted twice.

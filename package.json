@@ -49,18 +49,20 @@
     ]
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "*",
     "@types/node": "25.6.0",
     "prettier": "^3.5.0",
     "tsx": "4.22.4",
     "typescript": "6.0.3"
   },
-  "dependencies": {
-    "@earendil-works/pi-ai": "0.75.5"
-  },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.75.5"
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
   },
   "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
     "@earendil-works/pi-coding-agent": {
       "optional": true
     }
