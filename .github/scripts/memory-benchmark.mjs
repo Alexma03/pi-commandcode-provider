@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { execFile, spawn } from "node:child_process"
@@ -26,9 +26,7 @@ const piVersion = process.env.MEMORY_BENCHMARK_PI_VERSION ?? "unknown"
 const runtimeName = process.versions.bun ? "Bun" : "Node"
 const runtimeVersion = process.versions.bun ?? process.versions.node
 
-const benchmarkDir = await mkdir(join(tmpdir(), `pi-memory-benchmark-${process.pid}`), {
-  recursive: true,
-}).then(() => join(tmpdir(), `pi-memory-benchmark-${process.pid}`))
+const benchmarkDir = await mkdtemp(join(tmpdir(), "pi-memory-benchmark-"))
 const cachePath = join(benchmarkDir, "commandcode-models.json")
 await writeFile(
   cachePath,
@@ -295,6 +293,16 @@ function renderReport(summary, comparisons) {
     })
     .join("\n")
 
+  const clearChanges = metrics
+    .map(([key, label]) => [label, comparisons[key].headMinusBase])
+    .filter(([, estimate]) => Math.abs(estimate.median) > estimate.mad)
+  const interpretation =
+    clearChanges.length === 0
+      ? "No metric shows a clear Base-to-PR difference beyond its measured run-to-run variation."
+      : `Differences larger than their measured MAD: ${clearChanges
+          .map(([label, estimate]) => `${label} ${formatSignedEstimate(estimate)}`)
+          .join(", ")}.`
+
   const overheadRows = metrics
     .map(([key, label]) => {
       const comparison = comparisons[key]
@@ -308,6 +316,7 @@ function renderReport(summary, comparisons) {
     `| Metric | Base | PR | PR − Base | Change |\n` +
     `|---|---:|---:|---:|---:|\n` +
     `${comparisonRows}\n\n` +
+    `**Interpretation:** ${interpretation}\n\n` +
     `### Extension overhead above pi baseline\n\n` +
     `| Metric | Base overhead | PR overhead | Difference |\n` +
     `|---|---:|---:|---:|\n` +
