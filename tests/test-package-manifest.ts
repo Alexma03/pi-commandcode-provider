@@ -4,6 +4,7 @@ import { describe, it } from "node:test"
 
 interface PackageManifest {
   dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
   peerDependencies?: Record<string, string>
   peerDependenciesMeta?: Record<string, { optional?: boolean }>
 }
@@ -21,6 +22,7 @@ describe("package manifest", () => {
 
     for (const packageName of CORE_PEERS) {
       assert.equal(manifest.dependencies?.[packageName], undefined)
+      assert.equal(manifest.devDependencies?.[packageName], undefined)
       assert.equal(manifest.peerDependencies?.[packageName], "*")
       assert.equal(manifest.peerDependenciesMeta?.[packageName]?.optional, true)
     }
