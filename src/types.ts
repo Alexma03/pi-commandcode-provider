@@ -15,6 +15,7 @@ export interface Usage {
   output: number
   cacheRead: number
   cacheWrite: number
+  cacheWrite1h?: number
   totalTokens: number
   cost: UsageCost
 }
@@ -50,11 +51,19 @@ export interface AssistantMessageLike {
   timestamp: number
 }
 
-export interface ModelCost {
+export interface ModelCostRates {
   input: number
   output: number
   cacheRead: number
   cacheWrite: number
+}
+
+export interface ModelCostTier extends ModelCostRates {
+  inputTokensAbove: number
+}
+
+export interface ModelCost extends ModelCostRates {
+  tiers?: readonly ModelCostTier[]
 }
 
 export interface ModelLike {
