@@ -3,23 +3,9 @@
 [![CI](https://github.com/patlux/pi-commandcode-provider/actions/workflows/ci.yml/badge.svg)](https://github.com/patlux/pi-commandcode-provider/actions/workflows/ci.yml)
 [![Memory benchmark](https://github.com/patlux/pi-commandcode-provider/actions/workflows/memory-benchmark.yml/badge.svg)](https://github.com/patlux/pi-commandcode-provider/actions/workflows/memory-benchmark.yml)
 
-A [pi](https://github.com/badlogic/pi-mono) custom provider that connects pi to the [Command Code](https://commandcode.ai) API.
+A custom provider for [pi](https://github.com/earendil-works/pi) that connects to the [Command Code](https://commandcode.ai) Provider API.
 
-> **Disclaimer:** This is an unofficial, community-maintained package. I am not affiliated with, endorsed by, or connected to Command Code in any way. This provider simply forwards requests to the public Command Code API using your own API key.
-
-> **Note:** This package only provides a model _provider_. It does **not** include an API key. You must bring your own Command Code API key or subscription.
-
-> 💰 **Current offers:** Command Code offers [4× usage of DeepSeek V4 Pro](https://commandcode.ai/docs/resources/pricing-limits#deepseek-v4-pro-4x-usage) and [2× usage of Qwen 3.7 Max](https://commandcode.ai/docs/resources/pricing-limits#qwen-3.7-max-2x-usage).
-
-## Models
-
-Models are fetched live from Command Code's Provider API at startup, so new models like Qwen 3.7 Max show up without a package release.
-
-You can list the current Command Code models with:
-
-```sh
-pi -e index.ts --list-models
-```
+> **Disclaimer:** This is an unofficial, community-maintained integration. It is not affiliated with, endorsed by, or supported by Command Code. You need your own Command Code account and API key or subscription. Command Code's terms, availability, and pricing apply.
 
 ## Install
 
@@ -27,67 +13,55 @@ pi -e index.ts --list-models
 pi install npm:pi-commandcode-provider
 ```
 
-Or shorthand:
-
-```sh
-pi install pi-commandcode-provider
-```
-
-Then reload pi:
-
-```txt
-/reload
-```
-
-### Oh My Pi
-
-```sh
-omp plugin install pi-commandcode-provider
-```
-
-Then restart OMP or run:
-
-```txt
-/reload
-```
-
-## Setup
-
-Set your Command Code API key using one of these methods:
-
-### 1. Browser login (recommended)
-
-In pi, run:
+Start or reload pi, then authenticate:
 
 ```txt
 /login
 ```
 
-Then select **Command Code** from the provider list.
+Select **Use a subscription**, then **Command Code**. Complete the browser flow and choose a model with `/model`.
 
-<img width="1520" height="554" alt="image" src="https://github.com/user-attachments/assets/071e929a-6f49-4803-bfec-7a31368fb12a" />
+## Oh My Pi
 
-This opens Command Code in your browser and stores the returned API key in pi's auth file. If the browser shows "Copy your API key" because automatic transfer failed, copy that key and paste it into the pi terminal prompt.
+Install the same package in [Oh My Pi](https://github.com/can1357/oh-my-pi):
 
-> Note: `/login commandcode` is not supported by pi currently; use interactive `/login` and select Command Code.
+```sh
+omp plugin install pi-commandcode-provider
+```
 
-### 2. Environment variable
+Restart OMP or run `/reload`, then use `/login` and select **Use a subscription** followed by **Command Code**.
+
+## Authentication
+
+### Browser login
+
+Run `/login` in pi or OMP. Select **Use a subscription**, then **Command Code**. The browser flow stores the returned credential in the host's auth file.
+
+<img width="1520" height="554" alt="Select Command Code in pi's login dialog" src="https://github.com/user-attachments/assets/071e929a-6f49-4803-bfec-7a31368fb12a" />
+
+If automatic transfer from the browser fails, copy the API key shown by Command Code and paste it into the terminal prompt.
+
+### Environment variable
 
 ```sh
 export COMMANDCODE_API_KEY="user_..."
 ```
 
-### 3. Auth file
+### Auth file
 
-Create `~/.commandcode/auth.json`:
+The provider also reads existing credentials from:
+
+- `~/.commandcode/auth.json`
+- `~/.pi/agent/auth.json`
+- `~/.omp/agent/auth.json`
+
+Supported examples:
 
 ```json
 {
   "apiKey": "user_..."
 }
 ```
-
-The official Command Code CLI auth shape is also supported:
 
 ```json
 {
@@ -98,8 +72,6 @@ The official Command Code CLI auth shape is also supported:
 }
 ```
 
-Or use a pi/OMP auth file at `~/.pi/agent/auth.json` or `~/.omp/agent/auth.json`:
-
 ```json
 {
   "commandcode": "user_..."
@@ -108,55 +80,74 @@ Or use a pi/OMP auth file at `~/.pi/agent/auth.json` or `~/.omp/agent/auth.json`
 
 ## Usage
 
-After installing and setting your API key, select a Command Code model in pi:
+Open `/model` and select one of the models provided by Command Code. Model availability changes over time and is refreshed from the Provider API when the extension loads.
 
-```txt
-/model deepseek/deepseek-v4-flash
-```
-
-Any query will then use the Command Code API. You can list available models:
+List Command Code models from the terminal:
 
 ```sh
-pi -e index.ts --list-models   # or /models within pi
-omp -e index.ts --list-models
+pi --list-models commandcode
 ```
 
-In OMP, use the provider-qualified model name:
+In OMP, use:
+
+```sh
+omp models
+```
+
+For non-interactive OMP requests, use a provider-qualified model ID shown by `omp models`. For example:
 
 ```sh
 omp -p "hello" --model commandcode/deepseek/deepseek-v4-flash
 ```
 
-OMP currently resolves `--provider commandcode --model ...` before extension providers are loaded, so prefer `--model commandcode/<model-id>`. <!-- TODO: remove this note once OMP fixes provider resolution order for extension-loaded providers -->
+## Model discovery and offline behavior
 
-## Model discovery
-
-On startup, the provider fetches:
+The provider fetches the current model catalog from:
 
 ```txt
 https://api.commandcode.ai/provider/v1/models
 ```
 
-The last successfully fetched catalog is cached at `<agent-dir>/commandcode-models.json` (`~/.pi/agent/commandcode-models.json` by default). The agent directory follows pi's `PI_CODING_AGENT_DIR` setting, so compatible hosts such as OMP keep the cache in their own agent directory. If model discovery is temporarily unavailable, the provider uses this cached catalog so previously discovered Command Code models remain selectable. On a first offline start without a cache, pi still loads, but Command Code models remain unavailable until the connection is restored and `/reload` succeeds.
+The last successful catalog is cached at `<agent-dir>/commandcode-models.json`. For pi this is `~/.pi/agent/commandcode-models.json` by default. Compatible hosts such as OMP use their own agent directory.
 
-For tests or local mocks, override the endpoint with `COMMANDCODE_MODELS_URL` and the cache file with `COMMANDCODE_MODELS_CACHE`.
+If the endpoint is temporarily unavailable, the provider uses the cached catalog. On a first offline start without a cache, pi still loads, but Command Code models remain unavailable until the connection is restored and `/reload` succeeds.
 
-## Pricing
+The following environment variables are intended for tests, local mocks, and compatible API endpoints:
 
-Command Code does not yet expose model pricing through its Provider API. The provider ships a static cost table (`MODEL_COSTS` in `index.ts`) for known models so that pi can display per-model pricing.
+- `COMMANDCODE_API_BASE`
+- `COMMANDCODE_MODELS_URL`
+- `COMMANDCODE_MODELS_CACHE`
 
-- Models present in `MODEL_COSTS` show their real per-million-token rates (including promotional deals like the DeepSeek V4 Pro 4× discount and Qwen 3.7 Max 2× discount).
-- Models **not** in the table fall back to zero cost. When the Provider API adds a `cost` field, the static table can be removed.
+## Pricing display
 
-To add or update a price, edit the `MODEL_COSTS` record in `index.ts` and update the corresponding test in `tests/test-pricing.ts`.
+The Command Code Provider API does not currently include prices in its model catalog. This extension therefore keeps a static table for models with known prices so pi can display estimated request costs.
 
-## Contributing
+Models missing from that table display zero cost in pi. This does **not** mean that Command Code will bill the request at zero. Check the current [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits) before relying on the displayed value.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, PR expectations, and commit message rules.
+## Update and remove
 
-## Release
+Update installed pi packages:
 
-See [RELEASE.md](RELEASE.md) for the prerelease, npm smoke-test, stable publish, git tag, and GitHub follow-up checklist.
+```sh
+pi update --extensions
+```
+
+Remove the provider:
+
+```sh
+pi remove npm:pi-commandcode-provider
+```
+
+For OMP:
+
+```sh
+omp plugin upgrade pi-commandcode-provider
+omp plugin uninstall pi-commandcode-provider
+```
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and tests. See [RELEASE.md](RELEASE.md) for the release process.
 
 ## License
 
