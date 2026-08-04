@@ -3,19 +3,22 @@
  *
  * The provider ships its own cost function because Oh My Pi's legacy pi-ai
  * shim does not export `calculateCost` (see issue #24). This test locks the
- * local implementation to pi-ai's upstream `calculateCost` so the two cannot
- * drift while pi remains the reference host.
+ * local implementation to pi-ai's documented per-million-token arithmetic
+ * without installing another pi-ai runtime next to the extension.
  */
 
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { calculateCost, type Model } from "@earendil-works/pi-ai"
-
 import { calculateCommandCodeCost } from "../src/cost.ts"
 import type { Usage } from "../src/types.ts"
 
-type CostTable = Model<"openai-completions">["cost"]
+interface CostTable {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+}
 
 const COST_FIXTURES: Record<string, CostTable> = {
   "zero-cost-model": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -38,17 +41,12 @@ const USAGE_CASES = [
   { input: 7, output: 999_999_999, cacheRead: 0.5, cacheWrite: 42 },
 ]
 
-function piAiModel(id: string, cost: CostTable): Model<"openai-completions"> {
+function commandCodeModel(id: string, cost: CostTable) {
   return {
     id,
-    name: id,
-    api: "openai-completions",
+    api: "commandcode-custom",
     provider: "commandcode",
-    baseUrl: "https://api.commandcode.ai",
-    reasoning: false,
-    input: ["text"],
     cost,
-    contextWindow: 1_000_000,
     maxTokens: 65_536,
   }
 }
@@ -61,31 +59,40 @@ function freshUsage(tokens: (typeof USAGE_CASES)[number]): Usage {
   }
 }
 
+function expectedCost(cost: CostTable, tokens: (typeof USAGE_CASES)[number]): Usage["cost"] {
+  const input = (cost.input / 1_000_000) * tokens.input
+  const output = (cost.output / 1_000_000) * tokens.output
+  const cacheRead = (cost.cacheRead / 1_000_000) * tokens.cacheRead
+  const cacheWrite = (cost.cacheWrite * tokens.cacheWrite) / 1_000_000
+  return {
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+    total: input + output + cacheRead + cacheWrite,
+  }
+}
+
 describe("calculateCommandCodeCost()", () => {
-  it("matches pi-ai calculateCost exactly for all cost fields", () => {
+  it("applies per-million-token rates to all cost fields", () => {
     for (const [id, cost] of Object.entries(COST_FIXTURES)) {
-      const model = piAiModel(id, cost)
+      const model = commandCodeModel(id, cost)
 
       for (const tokens of USAGE_CASES) {
-        const ours = freshUsage(tokens)
-        const upstream = freshUsage(tokens)
+        const usage = freshUsage(tokens)
+        calculateCommandCodeCost(model, usage)
 
-        calculateCommandCodeCost(model, ours)
-        calculateCost(model, upstream)
-
-        for (const key of ["input", "output", "cacheRead", "cacheWrite", "total"] as const) {
-          assert.equal(
-            ours.cost[key],
-            upstream.cost[key],
-            `${id} cost.${key} for tokens=${JSON.stringify(tokens)}`,
-          )
-        }
+        assert.deepEqual(
+          usage.cost,
+          expectedCost(cost, tokens),
+          `${id} cost for tokens=${JSON.stringify(tokens)}`,
+        )
       }
     }
   })
 
   it("writes the total as the sum of all cost components", () => {
-    const model = piAiModel("claude-sonnet-4-6", COST_FIXTURES["claude-sonnet-4-6"])
+    const model = commandCodeModel("claude-sonnet-4-6", COST_FIXTURES["claude-sonnet-4-6"])
     const usage = freshUsage({ input: 1_000, output: 500, cacheRead: 10_000, cacheWrite: 2_000 })
 
     calculateCommandCodeCost(model, usage)

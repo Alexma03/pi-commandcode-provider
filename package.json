@@ -49,7 +49,6 @@
     ]
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "*",
     "@types/node": "25.6.0",
     "prettier": "^3.5.0",
     "tsx": "4.22.4",

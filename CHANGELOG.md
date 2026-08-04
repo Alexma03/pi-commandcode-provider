@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Use the host-provided `pi-ai` and `pi-coding-agent` core packages instead of installing a private pinned `pi-ai` runtime copy.
+- Use the host-provided `pi-ai` and `pi-coding-agent` core packages instead of installing private runtime copies, including for local and out-of-store development checkouts.
 
 ## 0.4.4 - 2026-08-03
 
