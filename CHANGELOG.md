@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Refresh display pricing for the current Command Code model catalog, remove expired Qwen promotional rates, add current free and discounted models, and require review when temporary prices expire.
 - Use the host-provided `pi-ai` and `pi-coding-agent` core packages instead of installing private runtime copies, including for local and out-of-store development checkouts.
 
 ## 0.4.4 - 2026-08-03

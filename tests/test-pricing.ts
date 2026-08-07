@@ -1,90 +1,177 @@
 import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
 import { describe, it } from "node:test"
 
-// MODEL_COSTS is a module-level const in index.ts. We verify the pricing
-// overlay by importing the map through a dedicated re-export so tests don't
-// need to spin up the full extension.
-//
-// To keep the test self-contained without importing the full extension (which
-// requires ExtensionAPI), we read the source and extract the constant at
-// runtime. A cleaner approach would be a dedicated src/pricing.ts module,
-// but for now we verify the known cost entries directly.
+import {
+  MODEL_COSTS,
+  PRICING_LAST_VERIFIED,
+  PRICING_SOURCE_URL,
+  TEMPORARY_PRICING,
+} from "../src/pricing.ts"
 
-import { readFileSync } from "node:fs"
-import { resolve, dirname } from "node:path"
-import { fileURLToPath } from "node:url"
+interface ModelCatalogSnapshot {
+  fetchedAt: string
+  source: string
+  modelIds: string[]
+}
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const indexSource = readFileSync(resolve(__dirname, "..", "index.ts"), "utf-8")
+interface PricingSnapshot {
+  verifiedAt: string
+  source: string
+  tierPolicy: string
+  tiers: Record<string, [number, number, number, number, number][]>
+  costs: Record<string, [number, number, number, number]>
+}
 
-// Extract MODEL_COSTS object from index.ts source using a simple parse.
-// The map is written as a Record<string, {input:number,output:number,...}>
-// so we eval it in a sandboxed context.
-const match = indexSource.match(
-  /const MODEL_COSTS:\s*Record<string,\s*CommandCodeModelCost>\s*=\s*\{([\s\S]*?)\n\}/,
-)
-assert.ok(match, "MODEL_COSTS constant should exist in index.ts")
+const fixtureUrl = new URL("./fixtures/commandcode-model-ids.json", import.meta.url)
+const fixture = JSON.parse(await readFile(fixtureUrl, "utf-8")) as ModelCatalogSnapshot
+const pricingFixtureUrl = new URL("./fixtures/commandcode-pricing.json", import.meta.url)
+const pricingFixture = JSON.parse(await readFile(pricingFixtureUrl, "utf-8")) as PricingSnapshot
+const freeModels = new Set(["poolside/laguna-s-2.1-free", "inclusionai/ling-3.0-flash-free"])
 
-// Parse the cost entries from the extracted block.
-const costBlock = match[1]
-const entries: Record<string, { input: number; output: number }> = {}
-for (const line of costBlock.split("\n")) {
-  const trimmed = line.trim()
-  if (!trimmed || trimmed.startsWith("//")) continue
-  const entryMatch = trimmed.match(/^"([^"]+)":\s*\{\s*input:\s*([\d.]+),\s*output:\s*([\d.]+)/)
-  if (entryMatch) {
-    entries[entryMatch[1]] = {
-      input: Number(entryMatch[2]),
-      output: Number(entryMatch[3]),
-    }
-  }
+function assertCost(
+  modelId: string,
+  expected: { input: number; output: number; cacheRead: number; cacheWrite: number },
+) {
+  const cost = MODEL_COSTS[modelId]
+  assert.ok(cost, `${modelId} should have pricing`)
+  assert.deepEqual(
+    {
+      input: cost.input,
+      output: cost.output,
+      cacheRead: cost.cacheRead,
+      cacheWrite: cost.cacheWrite,
+    },
+    expected,
+    `${modelId} base pricing should match the source`,
+  )
 }
 
 describe("MODEL_COSTS pricing overlay", () => {
-  it("covers known Command Code models with non-zero pricing", () => {
-    const knownModels = [
-      "deepseek/deepseek-v4-flash",
-      "deepseek/deepseek-v4-pro",
-      "claude-sonnet-4-6",
-      "claude-opus-4-7",
-      "Qwen/Qwen3.7-Max",
-      "gpt-5.5",
-      "stepfun/Step-3.5-Flash",
-    ]
+  it("covers the current Command Code model catalog snapshot", () => {
+    assert.equal(fixture.source, "https://api.commandcode.ai/provider/v1/models")
+    assert.match(fixture.fetchedAt, /^2026-08-04T/)
 
-    for (const id of knownModels) {
-      const cost = entries[id]
-      assert.ok(cost, `MODEL_COSTS should include "${id}"`)
-      assert.ok(cost.input > 0, `"${id}" input cost should be > 0`)
-      assert.ok(cost.output > 0, `"${id}" output cost should be > 0`)
+    const catalogIds = [...fixture.modelIds].sort()
+    const pricedIds = Object.keys(MODEL_COSTS).sort()
+    assert.deepEqual(pricedIds, catalogIds)
+  })
+
+  it("matches the verified official pricing snapshot", () => {
+    assert.equal(pricingFixture.verifiedAt, PRICING_LAST_VERIFIED)
+    assert.equal(pricingFixture.source, PRICING_SOURCE_URL)
+    assert.match(pricingFixture.tierPolicy, /request-wide input tiers/)
+
+    const expected = Object.fromEntries(
+      Object.entries(pricingFixture.costs).map(
+        ([modelId, [input, output, cacheRead, cacheWrite]]) => [
+          modelId,
+          {
+            input,
+            output,
+            cacheRead,
+            cacheWrite,
+            ...(pricingFixture.tiers[modelId]
+              ? {
+                  tiers: pricingFixture.tiers[modelId].map(
+                    ([inputTokensAbove, tierInput, tierOutput, tierCacheRead, tierCacheWrite]) => ({
+                      inputTokensAbove,
+                      input: tierInput,
+                      output: tierOutput,
+                      cacheRead: tierCacheRead,
+                      cacheWrite: tierCacheWrite,
+                    }),
+                  ),
+                }
+              : {}),
+          },
+        ],
+      ),
+    )
+    assert.deepEqual(MODEL_COSTS, expected)
+  })
+
+  it("uses non-zero prices except for models documented as free", () => {
+    for (const [modelId, cost] of Object.entries(MODEL_COSTS)) {
+      assert.ok(cost.input >= 0, `${modelId} input cost should be non-negative`)
+      assert.ok(cost.output >= 0, `${modelId} output cost should be non-negative`)
+      assert.ok(cost.cacheRead >= 0, `${modelId} cache-read cost should be non-negative`)
+      assert.ok(cost.cacheWrite >= 0, `${modelId} cache-write cost should be non-negative`)
+
+      const allZero = Object.values(cost).every((value) => value === 0)
+      assert.equal(
+        allZero,
+        freeModels.has(modelId),
+        `${modelId} free-model status should be explicit`,
+      )
     }
   })
 
-  it("includes promotional pricing notes in comments", () => {
-    // The DeepSeek V4 Pro 4× deal and Qwen 3.7 Max 2× deal should be
-    // documented in the source comments.
-    assert.ok(
-      costBlock.includes("4× usage deal") || costBlock.includes("75% off"),
-      "DeepSeek V4 Pro promotional pricing should be documented",
-    )
-    assert.ok(
-      costBlock.includes("2× usage deal") || costBlock.includes("50% off"),
-      "Qwen 3.7 Max promotional pricing should be documented",
-    )
+  it("matches corrected official rates", () => {
+    assertCost("deepseek/deepseek-v4-flash", {
+      input: 0.14,
+      output: 0.28,
+      cacheRead: 0.0028,
+      cacheWrite: 0,
+    })
+    assertCost("Qwen/Qwen3.7-Max", {
+      input: 2.5,
+      output: 7.5,
+      cacheRead: 0.5,
+      cacheWrite: 3.13,
+    })
+    assertCost("xiaomi/mimo-v2.5-pro", {
+      input: 0.435,
+      output: 0.87,
+      cacheRead: 0.0036,
+      cacheWrite: 0,
+    })
+    assertCost("MiniMaxAI/MiniMax-M2.5", {
+      input: 0.3,
+      output: 1.2,
+      cacheRead: 0.03,
+      cacheWrite: 0,
+    })
   })
 
-  it("has cache pricing for models that support it", () => {
-    // Claude models should have non-zero cacheRead and cacheWrite costs.
-    const claudeModels = ["claude-sonnet-4-6", "claude-opus-4-7"]
-    for (const id of claudeModels) {
-      const fullEntryMatch = costBlock.match(
-        new RegExp(
-          `"${id.replace(/\//g, "\\\\")}":\\s*\\{[^}]+cacheRead:\\s*([\\d.]+)[^}]+cacheWrite:\\s*([\\d.]+)`,
-        ),
+  it("uses the documented base rates for context-dependent models", () => {
+    assertCost("Qwen/Qwen3.7-Plus", {
+      input: 0.4,
+      output: 1.6,
+      cacheRead: 0.08,
+      cacheWrite: 0.5,
+    })
+    assertCost("Qwen/Qwen3.7-Flash", {
+      input: 0.03,
+      output: 0.13,
+      cacheRead: 0.006,
+      cacheWrite: 0.038,
+    })
+    assertCost("gpt-5.6-terra", {
+      input: 1,
+      output: 6,
+      cacheRead: 0.1,
+      cacheWrite: 1.25,
+    })
+  })
+
+  it("tracks pricing provenance", () => {
+    assert.equal(PRICING_SOURCE_URL, "https://commandcode.ai/docs/resources/pricing-limits")
+    assert.equal(PRICING_LAST_VERIFIED, "2026-08-04")
+  })
+
+  it("fails once temporary pricing needs review", () => {
+    const today = new Date().toISOString().slice(0, 10)
+    for (const pricing of TEMPORARY_PRICING) {
+      assert.match(pricing.expiresOn, /^\d{4}-\d{2}-\d{2}$/)
+      assert.ok(pricing.models.length > 0)
+      assert.ok(
+        pricing.expiresOn >= today,
+        `${pricing.description} for ${pricing.models.join(", ")} expired on ${pricing.expiresOn}; refresh MODEL_COSTS`,
       )
-      assert.ok(fullEntryMatch, `"${id}" should have cacheRead and cacheWrite fields`)
-      assert.ok(Number(fullEntryMatch[1]) > 0, `"${id}" cacheRead should be > 0`)
-      assert.ok(Number(fullEntryMatch[2]) > 0, `"${id}" cacheWrite should be > 0`)
+      for (const modelId of pricing.models) {
+        assert.ok(MODEL_COSTS[modelId], `${modelId} should have a temporary price entry`)
+      }
     }
   })
 })
