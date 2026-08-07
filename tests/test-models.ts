@@ -94,10 +94,45 @@ describe("commandCodeModelsFromApiResponse()", () => {
     assert.equal(models[1]?.reasoning, false)
   })
 
-  it("builds explicit maps for every known effort set", () => {
+  it("matches the exact command-code@1.14.1 reasoning effort catalog", () => {
+    assert.deepEqual(MODEL_EFFORTS, {
+      "Qwen/Qwen3.8-Max": ["low", "medium", "xhigh"],
+      "claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
+      "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
+      "claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
+      "claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
+      "claude-sonnet-4-6": ["low", "medium", "high", "xhigh", "max"],
+      "claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
+      "deepseek/deepseek-v4-flash": ["high", "max"],
+      "deepseek/deepseek-v4-pro": ["high", "max"],
+      "gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
+      "gpt-5.4": ["low", "medium", "high", "xhigh"],
+      "gpt-5.4-mini": ["low", "medium", "high"],
+      "gpt-5.5": ["low", "medium", "high", "xhigh"],
+      "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
+      "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max"],
+      "gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max"],
+      "google/gemini-3.1-flash-lite": ["low", "medium", "high"],
+      "google/gemini-3.5-flash": ["low", "medium", "high"],
+      "google/gemini-3.5-flash-lite": ["low", "medium", "high"],
+      "google/gemini-3.6-flash": ["low", "medium", "high"],
+      "sakana/fugu-ultra": ["high", "xhigh"],
+      "xai/grok-4.5": ["low", "medium", "high"],
+      "zai-org/GLM-5.2": ["high", "max"],
+    })
+  })
+
+  it("builds separate canonical pi and OMP metadata", () => {
     for (const [modelId, efforts] of Object.entries(MODEL_EFFORTS)) {
       const metadata = thinkingMetadataForModel(modelId)
       assert.ok(metadata, `${modelId} should have reasoning metadata`)
+      assert.equal(metadata.thinking.mode, "effort")
+      assert.deepEqual(metadata.thinking.efforts, efforts)
+      assert.deepEqual(
+        metadata.thinking.effortMap,
+        Object.fromEntries(efforts.map((effort) => [effort, effort])),
+      )
+      assert.equal("defaultLevel" in metadata.thinking, false)
       for (const level of ["minimal", "low", "medium", "high", "xhigh", "max"] as const) {
         const expected = efforts.includes(level)
         assert.equal(

@@ -75,9 +75,9 @@ export interface ModelLike {
   reasoning?: boolean
   thinkingLevelMap?: Partial<Record<string, string | null>>
   thinking?: {
-    effortMap?: Partial<Record<string, string | null>>
+    mode?: "effort"
+    effortMap?: Partial<Record<string, string>>
     efforts?: readonly string[]
-    defaultLevel?: string
   }
 }
 
