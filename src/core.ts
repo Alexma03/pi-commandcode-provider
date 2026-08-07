@@ -7,10 +7,12 @@
 
 import { randomUUID } from "node:crypto"
 
+import { commandCodeErrorMessage, redactCommandCodeErrorText } from "./overflow.ts"
 import {
   getApiKey,
   getEnvironmentInfo,
   isRecord,
+  assertTextOnlyMessages,
   mapFinishReason,
   messagesToCC,
   numberValue,
@@ -36,10 +38,17 @@ import type {
 } from "./types.ts"
 
 export * from "./converters.ts"
+export * from "./overflow.ts"
 export * from "./types.ts"
 
 export const DEFAULT_API_BASE = "https://api.commandcode.ai"
 export const COMMAND_CODE_CLI_VERSION = "0.29.0"
+/**
+ * The legacy /alpha/generate request path used by this provider has no
+ * documented image-part contract. Keep the advertised capability text-only
+ * until Command Code documents and tests image handling for this endpoint.
+ */
+export const COMMAND_CODE_INPUT_TYPES = ["text"] as const
 
 const DEFAULT_GENERATE_MAX_TOKENS = 64_000
 const DEFAULT_MAX_RETRIES = 0
@@ -188,6 +197,31 @@ export function createStreamCommandCode(deps: CoreDependencies) {
         },
         (error: unknown) => {
           signal.removeEventListener("abort", onAbort)
+          reject(error)
+        },
+      )
+    })
+  }
+
+  function raceAbortWithTimeout<T>(
+    promise: Promise<T>,
+    controller: AbortController,
+    timeoutMs: number | undefined,
+  ): Promise<T> {
+    if (timeoutMs === undefined) return raceAbort(promise, controller.signal)
+
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        controller.abort()
+        reject(timeoutError(timeoutMs))
+      }, timeoutMs)
+      raceAbort(promise, controller.signal).then(
+        (value) => {
+          clearTimeout(timer)
+          resolve(value)
+        },
+        (error: unknown) => {
+          clearTimeout(timer)
           reject(error)
         },
       )
@@ -418,9 +452,10 @@ export function createStreamCommandCode(deps: CoreDependencies) {
           }
 
           case "error": {
-            const errorRecord = isRecord(event.error) ? event.error : undefined
             const message =
-              stringValue(errorRecord?.message) ?? stringValue(event.error) ?? "Stream error"
+              commandCodeErrorMessage(event.error) ??
+              commandCodeErrorMessage(event.message) ??
+              "Stream error"
             output.stopReason = "error"
             output.errorMessage = message
             throw new Error(message)
@@ -430,10 +465,14 @@ export function createStreamCommandCode(deps: CoreDependencies) {
 
       try {
         stream.push({ type: "start", partial: output })
+        if (controller.signal.aborted) throw abortError("Aborted")
 
         const workingDir = cwd()
         const threadId = uuid()
         const reasoningEffort = mappedReasoningEffort(model, options)
+        const timeoutMs = options?.timeoutMs
+
+        assertTextOnlyMessages(context.messages)
 
         let body: unknown = {
           config: {
@@ -463,15 +502,23 @@ export function createStreamCommandCode(deps: CoreDependencies) {
           threadId,
         }
 
-        const nextBody = await raceAbort(
-          Promise.resolve(options?.onPayload?.(body, model)),
-          controller.signal,
-        )
+        const payloadController = new AbortController()
+        const onPayloadAbort = () => payloadController.abort()
+        controller.signal.addEventListener("abort", onPayloadAbort, { once: true })
+        let nextBody: unknown
+        try {
+          nextBody = await raceAbortWithTimeout(
+            Promise.resolve(options?.onPayload?.(body, model)),
+            payloadController,
+            timeoutMs,
+          )
+        } finally {
+          controller.signal.removeEventListener("abort", onPayloadAbort)
+        }
         if (nextBody !== undefined) body = nextBody
 
         const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES
         const maxRetryDelayMs = effectiveMaxRetryDelayMs(options?.maxRetryDelayMs)
-        const timeoutMs = options?.timeoutMs
         const requestHeaders = {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
@@ -505,6 +552,11 @@ export function createStreamCommandCode(deps: CoreDependencies) {
           }
           const onOuterAbort = () => attemptController.abort()
           controller.signal.addEventListener("abort", onOuterAbort, { once: true })
+          const raceAttempt = <T>(promise: Promise<T>): Promise<T> =>
+            raceAbort(promise, attemptController.signal).catch((error: unknown) => {
+              if (attemptTimedOut) throw timeoutError(timeoutMs)
+              throw error
+            })
 
           try {
             try {
@@ -540,25 +592,38 @@ export function createStreamCommandCode(deps: CoreDependencies) {
               }
             }
 
-            await raceAbort(
-              Promise.resolve(
-                options?.onResponse?.(
-                  {
-                    status: response.status,
-                    headers: headersToRecord(response.headers),
-                  },
-                  model,
+            try {
+              await raceAttempt(
+                Promise.resolve(
+                  options?.onResponse?.(
+                    {
+                      status: response.status,
+                      headers: headersToRecord(response.headers),
+                    },
+                    model,
+                  ),
                 ),
-              ),
-              controller.signal,
-            )
+              )
+            } catch (error: unknown) {
+              if (attemptTimedOut && attempt < maxRetries) continue retryLoop
+              throw error
+            }
 
             if (!response.ok) {
-              const errBody = await raceAbort(
-                response.text().catch(() => ""),
-                controller.signal,
+              const errBody = await raceAttempt(response.text().catch(() => ""))
+              let errorDetail: string | undefined
+              try {
+                const parsedBody: unknown = JSON.parse(errBody)
+                errorDetail = commandCodeErrorMessage(parsedBody)
+              } catch {
+                // Preserve useful plain-text provider errors only after secret
+                // redaction; upstream/proxy bodies may echo credentials.
+              }
+              const safeBody = redactCommandCodeErrorText(errBody).slice(0, 500)
+              const detail = redactCommandCodeErrorText(
+                errorDetail ?? (safeBody || "Provider returned an error"),
               )
-              throw new Error(`Command Code API error ${response.status}: ${errBody.slice(0, 500)}`)
+              throw new Error(`Command Code API error ${response.status}: ${detail}`)
             }
 
             // --- Read response stream ---
@@ -639,9 +704,7 @@ export function createStreamCommandCode(deps: CoreDependencies) {
         output.errorMessage =
           reason === "aborted"
             ? "Request aborted"
-            : error instanceof Error
-              ? error.message
-              : String(error)
+            : redactCommandCodeErrorText(error instanceof Error ? error.message : String(error))
         stream.push({ type: "error", reason, error: output })
         stream.end()
       } finally {
@@ -668,7 +731,9 @@ export function createStreamCommandCode(deps: CoreDependencies) {
         model: model.id,
         usage: defaultUsage(),
         stopReason: "error",
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: redactCommandCodeErrorText(
+          error instanceof Error ? error.message : String(error),
+        ),
         timestamp: now(),
       }
       stream.push({ type: "error", reason: "error", error: msg })

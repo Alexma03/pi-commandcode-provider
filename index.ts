@@ -2,14 +2,8 @@
  * Command Code provider for pi.
  *
  * Connects pi to Command Code's API (https://api.commandcode.ai/alpha/generate).
- *
- * Authentication (pick one):
- *   1. Run `/login`, then select Command Code — opens browser to commandcode.ai, auto-stores API key
- *   2. Set COMMANDCODE_API_KEY environment variable
- *   3. Place API key in `~/.commandcode/auth.json` or `~/.pi/agent/auth.json`
- *      as {"apiKey": "user_..."} or {"commandcode": "user_..."}
- *
- * Models are fetched from Command Code's Provider API at startup.
+ * The provider uses pi's legacy extension registration surface because the
+ * current pi host exposes `registerProvider(name, config)`, including OMP.
  */
 
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai"
@@ -21,8 +15,12 @@ import {
 } from "@earendil-works/pi-coding-agent"
 import { join } from "node:path"
 
-import { getApiKey as getStoredApiKey } from "./src/converters.ts"
-import { COMMAND_CODE_CLI_VERSION, createStreamCommandCode, DEFAULT_API_BASE } from "./src/core.ts"
+import {
+  COMMAND_CODE_CLI_VERSION,
+  COMMAND_CODE_INPUT_TYPES,
+  createStreamCommandCode,
+  DEFAULT_API_BASE,
+} from "./src/core.ts"
 import { calculateCommandCodeCost } from "./src/cost.ts"
 import {
   DEFAULT_MODELS_URL,
@@ -34,6 +32,7 @@ import {
 import { getApiKey as getOAuthApiKey, login, refreshToken } from "./src/oauth.ts"
 import { MODEL_COSTS, ZERO_MODEL_COST } from "./src/pricing.ts"
 import { createCommandCodeRuntime } from "./src/runtime.ts"
+import { normalizeCommandCodeMessage } from "./src/overflow.ts"
 
 function createProviderConfig(
   models: readonly CommandCodeModel[],
@@ -43,12 +42,16 @@ function createProviderConfig(
   return {
     name: "Command Code",
     baseUrl: apiBase,
+    // Keep environment authentication dynamic. OAuth credentials are resolved
+    // by pi's oauth registration, while the custom stream retains its own
+    // request-time legacy-file fallback for older compatible hosts.
     apiKey: "$COMMANDCODE_API_KEY",
     authHeader: true,
     api: "commandcode-custom",
     streamSimple: streamCommandCode,
     headers: {
-      "x-commandcode-version": COMMAND_CODE_CLI_VERSION,
+      "x-command-code-version": COMMAND_CODE_CLI_VERSION,
+      "x-cli-environment": "production",
     },
     oauth: {
       name: "Command Code",
@@ -56,17 +59,27 @@ function createProviderConfig(
       refreshToken,
       getApiKey: getOAuthApiKey,
     },
-    models: models.map((model) => ({
-      id: model.id,
-      name: model.name,
-      reasoning: model.reasoning,
-      ...(thinkingMetadataForModel(model.id) ?? {}),
-      input: ["text"] as const,
-      cost: MODEL_COSTS[model.id] ?? ZERO_MODEL_COST,
-      contextWindow: model.contextWindow,
-      maxTokens: model.maxTokens,
-    })),
+    models: models.map(createProviderModel),
   }
+}
+
+function createProviderModel(model: {
+  id: string
+  name: string
+  reasoning: boolean
+  contextWindow: number
+  maxTokens: number
+}) {
+  return {
+    id: model.id,
+    name: model.name,
+    reasoning: model.reasoning,
+    ...(thinkingMetadataForModel(model.id) ?? {}),
+    input: COMMAND_CODE_INPUT_TYPES,
+    cost: MODEL_COSTS[model.id] ?? ZERO_MODEL_COST,
+    contextWindow: model.contextWindow,
+    maxTokens: model.maxTokens,
+  } as const
 }
 
 export default async function (pi: ExtensionAPI) {
@@ -79,6 +92,12 @@ export default async function (pi: ExtensionAPI) {
     createStream: () => new AssistantMessageEventStream(),
     calculateCost: calculateCommandCodeCost,
     apiBase,
+  })
+
+  pi.on("message_end", async (event, ctx) => {
+    if (event.message.role !== "assistant") return
+    const normalized = normalizeCommandCodeMessage(event.message, ctx.model?.provider)
+    return normalized ? { message: normalized.message } : undefined
   })
 
   const runtime = createCommandCodeRuntime<ProviderConfig, ExtensionCommandContext>(pi, {

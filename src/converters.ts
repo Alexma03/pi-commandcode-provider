@@ -3,6 +3,9 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import type { MessageLike, StopReason, ToolLike } from "./types.ts"
+import { toJsonSchema } from "./json-schema.ts"
+
+export { toJsonSchema } from "./json-schema.ts"
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -10,10 +13,6 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined
-}
-
-function booleanValue(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined
 }
 
 export function recordArray(value: unknown): readonly Record<string, unknown>[] {
@@ -56,6 +55,26 @@ function apiKeyFromCredentialRecord(value: unknown): string | undefined {
   return stringValue(value.key) ?? stringValue(value.access)
 }
 
+function hasImageContent(value: unknown): boolean {
+  if (isRecord(value)) return value.type === "image"
+  return recordArray(value).some((part) => part.type === "image")
+}
+
+function imageContentError(role: string): Error {
+  return new Error(
+    `Command Code does not support image content in ${role}; refusing to send it to avoid lossy handling`,
+  )
+}
+
+export function assertTextOnlyMessages(messages?: readonly MessageLike[]): void {
+  for (const message of messages ?? []) {
+    if (hasImageContent(message.content)) {
+      const role = message.role === "toolResult" ? "tool results" : `${message.role} messages`
+      throw imageContentError(role)
+    }
+  }
+}
+
 export function getApiKey(
   options: {
     env?: NodeJS.ProcessEnv
@@ -96,6 +115,8 @@ export function getApiKey(
 }
 
 export function textContent(message: { content?: unknown }): string {
+  if (hasImageContent(message.content)) throw imageContentError("tool results")
+
   return recordArray(message.content)
     .filter((part) => part.type === "text")
     .map((part) => stringValue(part.text) ?? "")
@@ -104,80 +125,6 @@ export function textContent(message: { content?: unknown }): string {
 
 export function getEnvironmentInfo(): string {
   return `${process.platform}-${process.arch}, Node.js ${process.version}`
-}
-
-export function toJsonSchema(schema: unknown): unknown {
-  if (!isRecord(schema)) return {}
-
-  const kind = stringValue(schema.kind) ?? stringValue(schema.type)
-  const enumValues = Array.isArray(schema.enum) ? schema.enum : undefined
-  if (enumValues) {
-    return { type: typeof enumValues[0], enum: enumValues }
-  }
-
-  switch (kind) {
-    case "string":
-    case "String":
-      return { type: "string" }
-    case "number":
-    case "Number":
-      return { type: "number" }
-    case "boolean":
-    case "Boolean":
-      return { type: "boolean" }
-    case "object":
-    case "Object": {
-      const properties: Record<string, unknown> = {}
-      const inferredRequired: string[] = []
-      const sourceProperties = isRecord(schema.properties) ? schema.properties : undefined
-      const optional = Array.isArray(schema.optional)
-        ? schema.optional.filter((item): item is string => typeof item === "string")
-        : []
-
-      if (sourceProperties) {
-        for (const [key, value] of Object.entries(sourceProperties)) {
-          properties[key] = toJsonSchema(value)
-          const valueRecord = isRecord(value) ? value : undefined
-          if (booleanValue(valueRecord?.optional) !== true && !optional.includes(key)) {
-            inferredRequired.push(key)
-          }
-        }
-      }
-
-      const explicitRequired = Array.isArray(schema.required)
-        ? schema.required.filter((item): item is string => typeof item === "string")
-        : undefined
-      const required = explicitRequired ?? inferredRequired
-      const out: Record<string, unknown> = { type: "object" }
-      if (Object.keys(properties).length > 0) out.properties = properties
-      if (required.length > 0) out.required = required
-      return out
-    }
-    case "array":
-    case "Array":
-      return {
-        type: "array",
-        items: toJsonSchema(schema.items ?? schema.element),
-      }
-    case "union":
-    case "Union": {
-      const variants = Array.isArray(schema.variants)
-        ? schema.variants
-        : Array.isArray(schema.anyOf)
-          ? schema.anyOf
-          : []
-      for (const variant of variants) {
-        const converted = toJsonSchema(variant)
-        if (isRecord(converted) && Object.keys(converted).length > 0) return converted
-      }
-      return {}
-    }
-    case "optional":
-    case "Optional":
-      return toJsonSchema(schema.wrapped ?? schema.inner)
-    default:
-      return {}
-  }
 }
 
 export function toolsToJson(tools?: readonly ToolLike[]): unknown[] {
@@ -211,6 +158,8 @@ function completeToolCallIds(messages?: readonly MessageLike[]): Set<string> {
 }
 
 export function messagesToCC(messages?: readonly MessageLike[]): unknown[] {
+  assertTextOnlyMessages(messages)
+
   const out: unknown[] = []
   const pairedToolCallIds = completeToolCallIds(messages)
 

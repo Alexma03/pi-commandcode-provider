@@ -10,6 +10,8 @@ import { join } from "node:path"
 import { describe, it } from "node:test"
 
 import {
+  assertTextOnlyMessages,
+  COMMAND_CODE_INPUT_TYPES,
   getApiKey,
   getEnvironmentInfo,
   mapFinishReason,
@@ -20,6 +22,7 @@ import {
   toJsonSchema,
   toolsToJson,
 } from "../src/core.ts"
+import { redactCommandCodeErrorText } from "../src/overflow.ts"
 
 import { objectAt } from "./helpers.ts"
 
@@ -90,6 +93,20 @@ describe("getApiKey()", () => {
   })
 })
 
+describe("error redaction", () => {
+  it("redacts bearer, credential, and query-string secrets", () => {
+    const redacted = redactCommandCodeErrorText(
+      "Bearer user_secret_value api_key=user_secret_value https://example.test/x?token=user_secret_value",
+    )
+    assert.doesNotMatch(redacted, /user_secret_value/)
+    assert.match(redacted, /Bearer \[redacted\]/)
+    assert.doesNotMatch(
+      redactCommandCodeErrorText("provider returned sk-test-secret-value-1234567890"),
+      /sk-test-secret-value/,
+    )
+  })
+})
+
 describe("projectSlugFromPath()", () => {
   it("matches the official CLI-style slug from an absolute working directory", () => {
     assert.equal(
@@ -100,17 +117,60 @@ describe("projectSlugFromPath()", () => {
   })
 })
 
+describe("text-only image handling", () => {
+  it("does not advertise image input capability", () => {
+    assert.deepEqual(COMMAND_CODE_INPUT_TYPES, ["text"])
+  })
+
+  it("rejects image content instead of dropping it", () => {
+    assert.throws(
+      () =>
+        assertTextOnlyMessages([
+          {
+            role: "user",
+            content: [{ type: "image", data: "base64-data", mimeType: "image/png" }],
+          },
+        ]),
+      /does not support image content.*refusing to send it/i,
+    )
+    assert.throws(
+      () =>
+        assertTextOnlyMessages([
+          {
+            role: "toolResult",
+            toolCallId: "c1",
+            content: [{ type: "image", data: "base64-data", mimeType: "image/png" }],
+          },
+        ]),
+      /does not support image content.*refusing to send it/i,
+    )
+  })
+})
+
 describe("textContent()", () => {
   it("extracts and joins text blocks", () => {
     assert.equal(
       textContent({
         content: [
           { type: "text", text: "hello" },
-          { type: "image", data: "x" },
           { type: "text", text: "world" },
         ],
       }),
       "hello\nworld",
+    )
+  })
+
+  it("rejects mixed text and image content instead of dropping the image", () => {
+    assert.throws(
+      () =>
+        textContent({
+          content: [
+            { type: "text", text: "hello" },
+            { type: "image", data: "x", mimeType: "image/png" },
+            { type: "text", text: "world" },
+          ],
+        }),
+      /does not support image content.*refusing to send it/i,
     )
   })
 
@@ -177,6 +237,201 @@ describe("toJsonSchema()", () => {
     )
     assert.deepEqual(toJsonSchema(undefined), {})
     assert.deepEqual(toJsonSchema({ kind: "wat" }), {})
+    assert.deepEqual(toJsonSchema({ type: "wat", description: "not a schema" }), {})
+    assert.deepEqual(toJsonSchema({}), {})
+    assert.equal(toJsonSchema(true), true)
+  })
+
+  it("preserves complete JSON Schema metadata and nested schemas", () => {
+    assert.deepEqual(
+      toJsonSchema({
+        type: "object",
+        description: "Search options",
+        properties: {
+          query: {
+            type: "string",
+            description: "Text to search for",
+            minLength: 2,
+            maxLength: 50,
+            pattern: "^[a-z]+$",
+            default: "pi",
+          },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: 100,
+            exclusiveMinimum: 0,
+            multipleOf: 1,
+            default: 10,
+          },
+          tags: {
+            type: "array",
+            minItems: 1,
+            maxItems: 3,
+            uniqueItems: true,
+            items: {
+              type: "object",
+              properties: { name: { type: "string" } },
+              required: ["name"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["query", "limit"],
+        additionalProperties: false,
+      }),
+      {
+        type: "object",
+        description: "Search options",
+        properties: {
+          query: {
+            type: "string",
+            description: "Text to search for",
+            minLength: 2,
+            maxLength: 50,
+            pattern: "^[a-z]+$",
+            default: "pi",
+          },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: 100,
+            exclusiveMinimum: 0,
+            multipleOf: 1,
+            default: 10,
+          },
+          tags: {
+            type: "array",
+            minItems: 1,
+            maxItems: 3,
+            uniqueItems: true,
+            items: {
+              type: "object",
+              properties: { name: { type: "string" } },
+              required: ["name"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["query", "limit"],
+        additionalProperties: false,
+      },
+    )
+  })
+
+  it("preserves JSON Schema composition and nullable forms", () => {
+    assert.deepEqual(
+      toJsonSchema({
+        anyOf: [{ type: "string" }, { type: "number" }],
+        oneOf: [{ const: "a" }, { const: "b" }],
+        allOf: [{ minLength: 1 }, { maxLength: 10 }],
+        nullable: true,
+      }),
+      {
+        anyOf: [{ type: "string" }, { type: "number" }, { type: "null" }],
+        oneOf: [{ const: "a" }, { const: "b" }],
+        allOf: [{ minLength: 1 }, { maxLength: 10 }],
+      },
+    )
+    assert.deepEqual(toJsonSchema({ type: ["string", "null"] }), {
+      type: ["string", "null"],
+    })
+    assert.deepEqual(toJsonSchema({ type: "string", nullable: true }), {
+      type: ["string", "null"],
+    })
+  })
+
+  it("preserves dangerous schema property names", () => {
+    const inputProperties: Record<string, unknown> = {
+      constructor: { type: "number" },
+    }
+    Object.defineProperty(inputProperties, "__proto__", {
+      configurable: true,
+      enumerable: true,
+      value: { type: "string" },
+      writable: true,
+    })
+    const schema = toJsonSchema({
+      type: "object",
+      properties: inputProperties,
+      required: ["__proto__", "constructor"],
+    })
+    assert.ok(schema && typeof schema === "object" && !Array.isArray(schema))
+    if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+      throw new Error("expected object schema")
+    }
+    const outputProperties: unknown = Object.getOwnPropertyDescriptor(schema, "properties")?.value
+    assert.ok(outputProperties && typeof outputProperties === "object")
+    if (!outputProperties || typeof outputProperties !== "object") {
+      throw new Error("expected object properties")
+    }
+    assert.ok(Object.prototype.hasOwnProperty.call(outputProperties, "__proto__"))
+    assert.deepEqual(Object.getOwnPropertyDescriptor(outputProperties, "__proto__")?.value, {
+      type: "string",
+    })
+    assert.deepEqual(Object.getOwnPropertyDescriptor(outputProperties, "constructor")?.value, {
+      type: "number",
+    })
+  })
+
+  it("converts legacy shapes without collapsing unions", () => {
+    assert.deepEqual(
+      toJsonSchema({
+        kind: "Object",
+        description: "Legacy options",
+        properties: {
+          mode: {
+            kind: "union",
+            variants: [
+              { kind: "string", enum: ["fast", "safe"] },
+              { kind: "string", enum: ["debug"] },
+            ],
+          },
+          count: { kind: "Number", minimum: 1, optional: true },
+          nested: {
+            kind: "Array",
+            element: { kind: "object", properties: { value: { kind: "boolean" } } },
+          },
+        },
+        optional: ["count"],
+        additionalProperties: false,
+      }),
+      {
+        type: "object",
+        description: "Legacy options",
+        properties: {
+          mode: {
+            anyOf: [
+              { type: "string", enum: ["fast", "safe"] },
+              { type: "string", enum: ["debug"] },
+            ],
+          },
+          count: { type: "number", minimum: 1 },
+          nested: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { value: { type: "boolean" } },
+              required: ["value"],
+            },
+          },
+        },
+        required: ["mode", "nested"],
+        additionalProperties: false,
+      },
+    )
+    assert.deepEqual(
+      toJsonSchema({
+        kind: "intersect",
+        variants: [{ kind: "object", properties: { a: { kind: "string" } } }, { kind: "number" }],
+      }),
+      {
+        allOf: [
+          { type: "object", properties: { a: { type: "string" } }, required: ["a"] },
+          { type: "number" },
+        ],
+      },
+    )
   })
 })
 
