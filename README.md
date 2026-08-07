@@ -82,6 +82,10 @@ Supported examples:
 
 Open `/model` and select one of the models provided by Command Code. Model availability changes over time and is refreshed from the Provider API when the extension loads.
 
+### Reasoning support
+
+Reasoning metadata is enriched only for models whose Command Code effort support is known. Those models register a model-specific `thinkingLevelMap`, so pi and OMP expose only supported levels. A selected supported level is sent as the documented `params.reasoning_effort` field; `off`, unsupported levels, and newly discovered models without metadata do not add reasoning fields to the request. No prompt instructions are injected.
+
 List Command Code models from the terminal:
 
 ```sh
@@ -110,13 +114,25 @@ https://api.commandcode.ai/provider/v1/models
 
 The last successful catalog is cached at `<agent-dir>/commandcode-models.json`. For pi this is `~/.pi/agent/commandcode-models.json` by default. Compatible hosts such as OMP use their own agent directory.
 
-If the endpoint is temporarily unavailable, the provider uses the cached catalog. On a first offline start without a cache, pi still loads, but Command Code models remain unavailable until the connection is restored and `/reload` succeeds.
+If the endpoint is temporarily unavailable, the provider uses the cached catalog. On a first offline start without a cache, pi still loads, but Command Code models remain unavailable until the connection is restored and `/commandcode-refresh` succeeds.
+
+While pi is running, use these provider commands without restarting:
+
+- `/commandcode-refresh` fetches and re-registers the current model catalog. Overlapping refreshes are coalesced, and a failed refresh keeps the last valid catalog active.
+- `/commandcode-status` shows redacted discovery diagnostics, including the source, model count, timestamps, cache path, endpoint, and warning.
 
 The following environment variables are intended for tests, local mocks, and compatible API endpoints:
 
 - `COMMANDCODE_API_BASE`
 - `COMMANDCODE_MODELS_URL`
 - `COMMANDCODE_MODELS_CACHE`
+- `COMMANDCODE_MODELS_TIMEOUT_MS` (defaults to 10 seconds; invalid or non-positive values use the default)
+
+## Image input
+
+This provider currently advertises and accepts **text input only**. The extension uses Command Code's legacy `/alpha/generate` protocol, while the public Provider API documentation describes image parts for its documented `/provider/v1` endpoints. The legacy request path has no documented image-part contract, and the model catalog fixture exposes model IDs and context lengths but no image capability or limit fields.
+
+To avoid silently dropping or changing image data, the provider rejects image content in user messages and tool results before making a network request. It does not claim image capability or define image-size/count limits. This limitation can be revisited when Command Code documents image parts and limits for the protocol used here.
 
 ## Pricing display
 

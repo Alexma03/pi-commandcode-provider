@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict"
 import { spawn, spawnSync } from "node:child_process"
-import { accessSync, constants, mkdtempSync, rmSync } from "node:fs"
+import { accessSync, constants, mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { delimiter, dirname, join, resolve } from "node:path"
@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PROJECT_DIR = resolve(__dirname, "..")
 const EXT_PATH = resolve(PROJECT_DIR, "index.ts")
-const TEST_MODEL = "cc-offline-cache-model"
+const TEST_MODEL = "deepseek/deepseek-v4-flash"
 
 function findPiBinary() {
   if (process.env.PI_BIN) return process.env.PI_BIN
@@ -51,34 +51,53 @@ let requestCount = 0
 let modelListRequestCount = 0
 let lastRequestBody
 let lastRequestHeaders = {}
+let overflowMode = false
+let overflowRequestCount = 0
+let modelsDelayMs = 0
+let includeRefreshedModel = false
+
+function modelCatalog() {
+  const data = [
+    {
+      id: TEST_MODEL,
+      object: "model",
+      created: 1779824324,
+      owned_by: "command-code",
+      name: "DeepSeek V4 Flash",
+      context_length: 1_000_000,
+    },
+    {
+      id: "cc-second-model",
+      object: "model",
+      created: 1779824324,
+      owned_by: "command-code",
+      name: "Qwen 3.7 Max",
+      context_length: 1_000_000,
+    },
+  ]
+  if (includeRefreshedModel) {
+    data.push({
+      id: "cc-refreshed-model",
+      object: "model",
+      created: 1779824324,
+      owned_by: "command-code",
+      name: "Refreshed Model",
+      context_length: 200_000,
+    })
+  }
+  return { object: "list", data }
+}
 
 const server = createServer((req, res) => {
   if (req.method === "GET" && req.url === "/provider/v1/models") {
     modelListRequestCount += 1
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" })
-    res.end(
-      JSON.stringify({
-        object: "list",
-        data: [
-          {
-            id: TEST_MODEL,
-            object: "model",
-            created: 1779824324,
-            owned_by: "command-code",
-            name: "DeepSeek V4 Flash",
-            context_length: 1_000_000,
-          },
-          {
-            id: "cc-second-model",
-            object: "model",
-            created: 1779824324,
-            owned_by: "command-code",
-            name: "Qwen 3.7 Max",
-            context_length: 1_000_000,
-          },
-        ],
-      }),
-    )
+    const respond = () => {
+      if (res.destroyed) return
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" })
+      res.end(JSON.stringify(modelCatalog()))
+    }
+    if (modelsDelayMs > 0) setTimeout(respond, modelsDelayMs)
+    else respond()
     return
   }
 
@@ -89,6 +108,7 @@ const server = createServer((req, res) => {
   }
 
   requestCount += 1
+  if (overflowMode) overflowRequestCount += 1
   lastRequestHeaders = Object.fromEntries(
     Object.entries(req.headers).map(([key, value]) => [
       key,
@@ -107,11 +127,24 @@ const server = createServer((req, res) => {
       lastRequestBody = undefined
     }
 
+    if (overflowMode && overflowRequestCount === 2) {
+      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" })
+      res.end(JSON.stringify({ error: { message: "Input exceeds context limit" } }))
+      return
+    }
+
     res.writeHead(200, {
       "Content-Type": "text/plain; charset=utf-8",
       "Transfer-Encoding": "chunked",
     })
-    res.write(`${JSON.stringify({ type: "text-delta", text: "mock-pi-ok" })}\n`)
+    const text = overflowMode
+      ? overflowRequestCount === 1
+        ? "overflow-initial"
+        : overflowRequestCount === 3
+          ? "compaction-summary"
+          : "overflow-recovered"
+      : "mock-pi-ok"
+    res.write(`${JSON.stringify({ type: "text-delta", text })}\n`)
     res.write(
       `${JSON.stringify({ type: "finish", finishReason: "stop", totalUsage: { inputTokens: 1, outputTokens: 1 } })}\n`,
     )
@@ -125,11 +158,18 @@ const port = typeof address === "object" && address ? address.port : 0
 const apiBase = `http://127.0.0.1:${port}`
 
 const tempHome = mkdtempSync(join(tmpdir(), "pi-cc-home-"))
+const agentDir = join(tempHome, "custom-pi-agent")
+mkdirSync(agentDir, { recursive: true })
+writeFileSync(
+  join(agentDir, "settings.json"),
+  JSON.stringify({ compaction: { enabled: true, reserveTokens: 10, keepRecentTokens: 10 } }),
+)
 const env = {
   ...process.env,
   HOME: tempHome,
   USERPROFILE: tempHome,
-  PI_CODING_AGENT_DIR: join(tempHome, "custom-pi-agent"),
+  PI_CODING_AGENT_DIR: agentDir,
+  PI_CODING_AGENT_SESSION_DIR: join(tempHome, "sessions"),
   COMMANDCODE_API_BASE: apiBase,
   COMMANDCODE_API_KEY: "mock-key",
   COMMANDCODE_MODELS_URL: `${apiBase}/provider/v1/models`,
@@ -165,7 +205,12 @@ function runPi(args, timeoutMs = 30_000) {
   })
 }
 
-async function runRpcQuery(timeoutMs = 30_000) {
+async function runRpcQuery(
+  timeoutMs = 30_000,
+  promptMessage = "say mock token",
+  extraArgs = [],
+  promptFields = {},
+) {
   const child = spawn(
     PI_BIN,
     [
@@ -178,6 +223,7 @@ async function runRpcQuery(timeoutMs = 30_000) {
       "commandcode",
       "--model",
       TEST_MODEL,
+      ...extraArgs,
     ],
     {
       cwd: PROJECT_DIR,
@@ -212,7 +258,12 @@ async function runRpcQuery(timeoutMs = 30_000) {
     }
 
     child.stdin.write(
-      `${JSON.stringify({ id: "prompt-1", type: "prompt", message: "say mock token" })}\n`,
+      `${JSON.stringify({
+        id: "prompt-1",
+        type: "prompt",
+        message: promptMessage,
+        ...promptFields,
+      })}\n`,
     )
 
     child.stdout.on("data", (chunk) => {
@@ -265,6 +316,225 @@ async function runRpcQuery(timeoutMs = 30_000) {
   }
 }
 
+async function runRpcExtensionCommands(timeoutMs = 30_000) {
+  const child = spawn(
+    PI_BIN,
+    [
+      "--no-extensions",
+      "--mode",
+      "rpc",
+      "-e",
+      EXT_PATH,
+      "--provider",
+      "commandcode",
+      "--model",
+      TEST_MODEL,
+    ],
+    {
+      cwd: PROJECT_DIR,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  )
+
+  let buffer = ""
+  let stderr = ""
+  const events = []
+  const waiters = []
+
+  const publish = (event) => {
+    events.push(event)
+    for (let index = waiters.length - 1; index >= 0; index -= 1) {
+      const waiter = waiters[index]
+      if (!waiter.predicate(event)) continue
+      waiters.splice(index, 1)
+      clearTimeout(waiter.timer)
+      waiter.resolve(event)
+    }
+  }
+
+  child.stdout.on("data", (chunk) => {
+    buffer += chunk.toString("utf-8")
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try {
+        publish(JSON.parse(line))
+      } catch {
+        // Ignore non-JSON output.
+      }
+    }
+  })
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString("utf-8")
+  })
+
+  const waitFor = (predicate) =>
+    new Promise((resolve, reject) => {
+      const existing = events.find(predicate)
+      if (existing) {
+        resolve(existing)
+        return
+      }
+      const timer = setTimeout(() => {
+        const index = waiters.findIndex((waiter) => waiter.timer === timer)
+        if (index >= 0) waiters.splice(index, 1)
+        reject(new Error(`RPC event timeout. stderr: ${stderr.slice(-500)}`))
+      }, timeoutMs)
+      waiters.push({ predicate, resolve, timer })
+    })
+
+  const send = (value) => child.stdin.write(`${JSON.stringify(value)}\n`)
+
+  try {
+    send({ id: "commands", type: "get_commands" })
+    const commandsResponse = await waitFor(
+      (event) => event.type === "response" && event.id === "commands",
+    )
+    const commandNames = commandsResponse.data?.commands?.map((command) => command.name) ?? []
+
+    send({ id: "status-before", type: "prompt", message: "/commandcode-status" })
+    await waitFor(
+      (event) => event.type === "response" && event.id === "status-before" && event.success,
+    )
+    const statusBefore = await waitFor(
+      (event) =>
+        event.type === "extension_ui_request" &&
+        event.method === "notify" &&
+        typeof event.message === "string" &&
+        event.message.includes("model count: 2"),
+    )
+
+    includeRefreshedModel = true
+    send({ id: "refresh", type: "prompt", message: "/commandcode-refresh" })
+    await waitFor((event) => event.type === "response" && event.id === "refresh" && event.success)
+    const refreshNotification = await waitFor(
+      (event) =>
+        event.type === "extension_ui_request" &&
+        event.method === "notify" &&
+        typeof event.message === "string" &&
+        event.message.includes("3 models from live"),
+    )
+
+    send({ id: "status-after", type: "prompt", message: "/commandcode-status" })
+    await waitFor(
+      (event) => event.type === "response" && event.id === "status-after" && event.success,
+    )
+    const statusAfter = await waitFor(
+      (event) =>
+        event.type === "extension_ui_request" &&
+        event.method === "notify" &&
+        typeof event.message === "string" &&
+        event.message.includes("model count: 3"),
+    )
+
+    return {
+      commandNames,
+      statusBefore: statusBefore.message,
+      refreshNotification: refreshNotification.message,
+      statusAfter: statusAfter.message,
+      stderr,
+    }
+  } finally {
+    child.kill()
+  }
+}
+
+async function runRpcOverflowRecovery(timeoutMs = 60_000) {
+  const child = spawn(
+    PI_BIN,
+    [
+      "--no-extensions",
+      "--mode",
+      "rpc",
+      "-e",
+      EXT_PATH,
+      "--provider",
+      "commandcode",
+      "--model",
+      TEST_MODEL,
+    ],
+    {
+      cwd: PROJECT_DIR,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  )
+
+  let buffer = ""
+  let stderr = ""
+  const events = []
+  let firstSettled = false
+  let recovered = false
+
+  const result = new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      child.kill()
+      resolve({ ok: false })
+    }, timeoutMs)
+
+    const finish = (ok) => {
+      clearTimeout(timer)
+      child.kill()
+      resolve({ ok })
+    }
+
+    child.stdout.on("data", (chunk) => {
+      buffer += chunk.toString("utf-8")
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+      for (const line of lines) {
+        if (!line.trim()) continue
+        let event
+        try {
+          event = JSON.parse(line)
+        } catch {
+          continue
+        }
+        events.push(event)
+        if (event.type === "agent_settled" && !firstSettled) {
+          firstSettled = true
+          child.stdin.write(
+            `${JSON.stringify({ id: "overflow-prompt", type: "prompt", message: "trigger overflow recovery" })}\n`,
+          )
+        }
+        if (
+          event.type === "compaction_end" &&
+          event.reason === "overflow" &&
+          event.willRetry === true
+        ) {
+          recovered = true
+        }
+        if (recovered && event.type === "agent_settled") finish(true)
+      }
+    })
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf-8")
+    })
+    child.stdin.write(
+      `${JSON.stringify({ id: "initial-prompt", type: "prompt", message: "initial turn" })}\n`,
+    )
+  })
+
+  const outcome = await result
+  return {
+    ...outcome,
+    requests: overflowRequestCount,
+    sawNormalizedOverflow: events.some(
+      (event) =>
+        event.type === "message_end" &&
+        event.message?.role === "assistant" &&
+        typeof event.message.errorMessage === "string" &&
+        event.message.errorMessage.startsWith("context_length_exceeded:"),
+    ),
+    sawCompactionRetry: events.some(
+      (event) => event.type === "compaction_end" && event.reason === "overflow" && event.willRetry,
+    ),
+    stderrHasSecrets: /mock-key|user_secret|api_key/i.test(stderr),
+  }
+}
+
 try {
   console.log("[pi-local] first offline start without a cache")
   const onlineModelsUrl = env.COMMANDCODE_MODELS_URL
@@ -295,7 +565,7 @@ try {
   )
   assert.equal(recoveryList.code, 0, recoveryList.stderr)
   const recoveryOutput = recoveryList.stdout || recoveryList.stderr
-  assert.match(recoveryOutput, /cc-offline-cache-model/)
+  assert.match(recoveryOutput, /deepseek\/deepseek-v4-flash/)
   assert.match(recoveryOutput, /cc-second-model/)
   assert.doesNotMatch(recoveryList.stderr, /no valid cached catalog/)
   assert.doesNotMatch(recoveryList.stderr, /Failed to load extension/)
@@ -308,7 +578,7 @@ try {
   assert.equal(list.code, 0, list.stderr)
   const listOutput = list.stdout || list.stderr
   assert.match(listOutput, /commandcode/)
-  assert.match(listOutput, /cc-offline-cache-model/)
+  assert.match(listOutput, /deepseek\/deepseek-v4-flash/)
   assert.match(listOutput, /cc-second-model/)
   assert.equal(modelListRequestCount, 1)
   assert.doesNotThrow(() => accessSync(modelsCachePath, constants.R_OK))
@@ -321,7 +591,7 @@ try {
   )
   assert.equal(offlineList.code, 0, offlineList.stderr)
   const offlineListOutput = offlineList.stdout || offlineList.stderr
-  assert.match(offlineListOutput, /cc-offline-cache-model/)
+  assert.match(offlineListOutput, /deepseek\/deepseek-v4-flash/)
   assert.match(offlineListOutput, /cc-second-model/)
   assert.match(offlineList.stderr, /Using the cached catalog/)
 
@@ -347,7 +617,23 @@ try {
   assert.equal(requestCount, 1)
   env.COMMANDCODE_MODELS_URL = onlineModelsUrl
 
-  console.log("[pi-local] print mode through real extension and mock API")
+  console.log("[pi-local] discovery timeout through real extension")
+  rmSync(modelsCachePath, { force: true })
+  modelsDelayMs = 5_000
+  env.COMMANDCODE_MODELS_TIMEOUT_MS = "50"
+  const timeoutStartedAt = Date.now()
+  const timedOutList = await runPi(
+    ["--no-extensions", "-e", EXT_PATH, "--list-models", "commandcode"],
+    5_000,
+  )
+  const timeoutElapsedMs = Date.now() - timeoutStartedAt
+  assert.equal(timedOutList.code, 0, timedOutList.stderr)
+  assert.ok(timeoutElapsedMs < 2_000, `model discovery took ${timeoutElapsedMs}ms`)
+  assert.match(timedOutList.stderr, /timed out after 50ms/i)
+  modelsDelayMs = 0
+  delete env.COMMANDCODE_MODELS_TIMEOUT_MS
+
+  console.log("[pi-local] print mode with reasoning and tool schemas")
   requestCount = 0
   const print = await runPi(
     [
@@ -360,6 +646,8 @@ try {
       "commandcode",
       "--model",
       TEST_MODEL,
+      "--thinking",
+      "high",
     ],
     30_000,
   )
@@ -372,6 +660,30 @@ try {
     "should send a bearer Authorization header",
   )
   assert.equal(lastRequestBody?.params?.model, TEST_MODEL)
+  assert.equal(lastRequestBody?.params?.reasoning_effort, "high")
+  const sentTools = lastRequestBody?.params?.tools
+  assert.ok(Array.isArray(sentTools) && sentTools.length > 0)
+  const editTool = sentTools.find((tool) => tool.name === "edit")
+  assert.equal(editTool?.input_schema?.type, "object")
+  assert.equal(editTool?.input_schema?.properties?.edits?.type, "array")
+  assert.equal(editTool?.input_schema?.properties?.edits?.items?.type, "object")
+  assert.equal(
+    editTool?.input_schema?.properties?.edits?.items?.properties?.oldText?.type,
+    "string",
+  )
+
+  console.log("[pi-local] runtime commands through real RPC extension lifecycle")
+  includeRefreshedModel = false
+  const runtimeCommands = await runRpcExtensionCommands()
+  assert.ok(runtimeCommands.commandNames.includes("commandcode-refresh"))
+  assert.ok(runtimeCommands.commandNames.includes("commandcode-status"))
+  assert.match(runtimeCommands.statusBefore, /source: live/)
+  assert.match(runtimeCommands.refreshNotification, /3 models from live/)
+  assert.match(runtimeCommands.statusAfter, /model count: 3/)
+  assert.doesNotMatch(
+    `${runtimeCommands.statusBefore}\n${runtimeCommands.statusAfter}\n${runtimeCommands.stderr}`,
+    /mock-key/,
+  )
 
   console.log("[pi-local] RPC prompt through real extension and mock API")
   requestCount = 0
@@ -389,6 +701,38 @@ try {
   assert.equal(rpc.sawAssistantMessage, true)
   assert.equal(rpc.sawTextDelta, true)
   assert.equal(requestCount, 1)
+
+  console.log("[pi-local] reject image input through real RPC preflight/provider path")
+  requestCount = 0
+  const imageRpc = await runRpcQuery(10_000, "describe image", [], {
+    images: [
+      {
+        type: "image",
+        data: "iVBORw0KGgo=",
+        mimeType: "image/png",
+      },
+    ],
+  })
+  assert.equal(requestCount, 0)
+  assert.ok(
+    imageRpc.events.some(
+      (event) =>
+        event.type === "message_end" &&
+        event.message?.role === "assistant" &&
+        event.message?.stopReason === "error",
+    ) || imageRpc.stderr.includes("does not support image"),
+  )
+
+  console.log("[pi-local] verify overflow normalization and compaction recovery")
+  overflowMode = true
+  overflowRequestCount = 0
+  const overflowRpc = await runRpcOverflowRecovery()
+  assert.equal(overflowRpc.ok, true)
+  assert.ok(overflowRpc.requests >= 4)
+  assert.equal(overflowRpc.sawNormalizedOverflow, true)
+  assert.equal(overflowRpc.sawCompactionRetry, true)
+  assert.equal(overflowRpc.stderrHasSecrets, false)
+  overflowMode = false
 
   console.log("[pi-local] PASS")
 } finally {
