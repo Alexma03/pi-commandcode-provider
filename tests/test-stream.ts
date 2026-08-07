@@ -354,6 +354,34 @@ describe("streamCommandCode — successful streams", () => {
 })
 
 describe("streamCommandCode — request serialization", () => {
+  it("rejects image input before sending a lossy request", async () => {
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+    const events = await collectEvents(
+      streamCommandCode(
+        makeModel(),
+        makeContext({
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "image", data: "base64-data", mimeType: "image/png" }],
+            },
+          ],
+        }),
+        { apiKey: "mock-key" },
+      ),
+    )
+
+    assert.deepEqual(eventTypes(events), ["start", "error"])
+    const lastEvent = events.at(-1)
+    assert.equal(lastEvent?.type, "error")
+    if (lastEvent?.type === "error") {
+      assert.match(
+        lastEvent.error.errorMessage ?? "",
+        /does not support image content.*refusing to send it/i,
+      )
+    }
+    assert.equal(server.requestCount(), 0)
+  })
   it("sends the expected request body and default headers", async () => {
     server.mockResponse({
       type: "success",
@@ -394,6 +422,7 @@ describe("streamCommandCode — request serialization", () => {
     assert.equal(objectAt(body, ["params", "model"]), "deepseek/deepseek-v4-flash")
     assert.equal(objectAt(body, ["params", "stream"]), true)
     assert.equal(objectAt(body, ["params", "max_tokens"]), 500)
+    assert.equal(objectAt(body, ["params", "reasoning_effort"]), undefined)
     assert.equal(objectAt(body, ["params", "temperature"]), 0.3)
     assert.equal(objectAt(body, ["params", "system"]), "You are a test assistant.")
     assert.equal(objectAt(body, ["memory"]), null)
@@ -550,6 +579,51 @@ describe("streamCommandCode — request serialization", () => {
       objectAt(server.lastRequestBody(), ["params", "system"]),
       "You are a test assistant.\n\nUse concise answers.",
     )
+  })
+
+  it("times out a hung onResponse callback", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [JSON.stringify({ type: "finish", finishReason: "stop" })],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+    const started = Date.now()
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), {
+        apiKey: "mock-key",
+        timeoutMs: 25,
+        onResponse: async () => new Promise<void>(() => {}),
+      }),
+      1_000,
+    )
+
+    assert.ok(Date.now() - started < 500)
+    assert.deepEqual(eventTypes(events), ["start", "error"])
+    const error = events.at(-1)
+    assert.equal(error?.type, "error")
+    if (error?.type !== "error") throw new Error("expected error")
+    assert.match(error.error.errorMessage ?? "", /timed out after 25ms/)
+  })
+
+  it("times out a hung onPayload callback", async () => {
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+    const started = Date.now()
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), {
+        apiKey: "mock-key",
+        timeoutMs: 25,
+        onPayload: async () => new Promise<unknown>(() => {}),
+      }),
+      1_000,
+    )
+
+    assert.ok(Date.now() - started < 500)
+    assert.deepEqual(eventTypes(events), ["start", "error"])
+    const error = events.at(-1)
+    assert.equal(error?.type, "error")
+    if (error?.type !== "error") throw new Error("expected error")
+    assert.match(error.error.errorMessage ?? "", /timed out after 25ms/)
+    assert.equal(server.requestCount(), 0)
   })
 
   it("runs onPayload and onResponse hooks", async () => {
