@@ -86,6 +86,8 @@ Open `/model` and select one of the models provided by Command Code. Model avail
 
 Reasoning metadata is enriched only for models whose Command Code effort support is known. Those models register a model-specific `thinkingLevelMap`, so pi and OMP expose only supported levels. A selected supported level is sent as the documented `params.reasoning_effort` field; `off`, unsupported levels, and newly discovered models without metadata do not add reasoning fields to the request. No prompt instructions are injected.
 
+Reasoning blocks from completed assistant turns remain visible in pi's local session, but are not replayed to Command Code in later requests. Only the assistant's user-visible text and completed tool calls are sent back as history. This matches the current Command Code CLI behavior and prevents prior private reasoning traces from interfering with reasoning on follow-up turns.
+
 List Command Code models from the terminal:
 
 ```sh

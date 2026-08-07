@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Stop replaying completed assistant reasoning traces to Command Code while preserving visible text and completed tool calls in follow-up request history.
 - Add `/commandcode-refresh` and `/commandcode-status` commands for safe model-catalog refreshes and redacted diagnostics.
 - Bound model discovery to a configurable 10-second timeout so a slow Provider API cannot block pi startup; timed-out discovery uses the validated cache when available.
 - Normalize Command Code context overflow failures so pi can auto-compact and retry, while leaving unrelated rate-limit and capacity errors unchanged.

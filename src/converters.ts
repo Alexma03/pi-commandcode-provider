@@ -174,11 +174,6 @@ export function messagesToCC(messages?: readonly MessageLike[]): unknown[] {
       for (const content of recordArray(message.content)) {
         if (content.type === "text") {
           parts.push({ type: "text", text: stringValue(content.text) ?? "" })
-        } else if (content.type === "thinking") {
-          parts.push({
-            type: "reasoning",
-            text: stringValue(content.thinking) ?? "",
-          })
         } else if (content.type === "toolCall") {
           const toolCallId = stringValue(content.id) ?? ""
           if (!pairedToolCallIds.has(toolCallId)) continue
