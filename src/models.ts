@@ -2,9 +2,96 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 
 export const DEFAULT_MODELS_URL = "https://api.commandcode.ai/provider/v1/models"
+export const DEFAULT_MODELS_TIMEOUT_MS = 10_000
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 65_536
 const MODEL_CACHE_VERSION = 1
+
+export type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+
+type CommandCodeReasoningEffort = Exclude<PiThinkingLevel, "off">
+
+/**
+ * Per-model reasoning efforts supported by Command Code's generate endpoint.
+ *
+ * The Provider API does not expose reasoning metadata. This is an exact
+ * snapshot of `reasoningEfforts` from the command-code@1.14.1 model catalog
+ * (`packages/shared/src/model-catalog.ts`, also published in the generated
+ * `dist/bundled/command-code-knowledge/reference/models.md`). Models omitted
+ * here let Command Code choose their reasoning depth, matching the CLI.
+ */
+export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {
+  "Qwen/Qwen3.8-Max": ["low", "medium", "xhigh"],
+  "claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
+  "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
+  "claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
+  "claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
+  "claude-sonnet-4-6": ["low", "medium", "high", "xhigh", "max"],
+  "claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
+  "deepseek/deepseek-v4-flash": ["high", "max"],
+  "deepseek/deepseek-v4-pro": ["high", "max"],
+  "gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4-mini": ["low", "medium", "high"],
+  "gpt-5.5": ["low", "medium", "high", "xhigh"],
+  "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max"],
+  "google/gemini-3.1-flash-lite": ["low", "medium", "high"],
+  "google/gemini-3.5-flash": ["low", "medium", "high"],
+  "google/gemini-3.5-flash-lite": ["low", "medium", "high"],
+  "google/gemini-3.6-flash": ["low", "medium", "high"],
+  "sakana/fugu-ultra": ["high", "xhigh"],
+  "xai/grok-4.5": ["low", "medium", "high"],
+  "zai-org/GLM-5.2": ["high", "max"],
+}
+
+const PI_THINKING_LEVELS: readonly PiThinkingLevel[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]
+
+export function thinkingLevelMapForEfforts(
+  efforts: readonly string[],
+): Partial<Record<PiThinkingLevel, string | null>> {
+  const map: Partial<Record<PiThinkingLevel, string | null>> = {}
+  for (const level of PI_THINKING_LEVELS) {
+    if (level === "off") continue
+    map[level] = efforts.includes(level) ? level : null
+  }
+  return map
+}
+
+export interface ThinkingMetadata {
+  thinkingLevelMap: Partial<Record<PiThinkingLevel, string | null>>
+  thinking: {
+    mode: "effort"
+    effortMap: Partial<Record<CommandCodeReasoningEffort, string>>
+    efforts: readonly CommandCodeReasoningEffort[]
+  }
+}
+
+export function thinkingMetadataForModel(modelId: string): ThinkingMetadata | undefined {
+  const efforts = MODEL_EFFORTS[modelId]
+  if (!efforts) return undefined
+  return {
+    thinkingLevelMap: thinkingLevelMapForEfforts(efforts),
+    thinking: {
+      mode: "effort",
+      effortMap: Object.fromEntries(efforts.map((effort) => [effort, effort])),
+      efforts,
+    },
+  }
+}
+
+function isReasoningModel(modelId: string): boolean {
+  return MODEL_EFFORTS[modelId] !== undefined
+}
 
 interface ApiModel {
   id: string
@@ -23,6 +110,8 @@ export interface CommandCodeModel {
 interface FetchCommandCodeModelsOptions {
   url?: string
   fetchImpl?: typeof fetch
+  signal?: AbortSignal
+  timeoutMs?: number
 }
 
 interface LoadCommandCodeModelsOptions extends FetchCommandCodeModelsOptions {
@@ -74,10 +163,12 @@ function parseApiModel(value: unknown): ApiModel {
 function parseCachedModel(value: unknown): CommandCodeModel {
   if (!isRecord(value)) throw new Error("Expected cached model entry to be an object")
 
+  const id = stringField(value, "id")
+  booleanField(value, "reasoning")
   return {
-    id: stringField(value, "id"),
+    id,
     name: stringField(value, "name"),
-    reasoning: booleanField(value, "reasoning"),
+    reasoning: isReasoningModel(id),
     contextWindow: positiveNumberField(value, "contextWindow"),
     maxTokens: positiveNumberField(value, "maxTokens"),
   }
@@ -92,6 +183,85 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function abortError(reason: unknown): Error {
+  if (reason instanceof Error) return reason
+  return new DOMException("The operation was aborted", "AbortError")
+}
+
+function configuredTimeoutMs(timeoutMs: number | undefined): number {
+  return timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : DEFAULT_MODELS_TIMEOUT_MS
+}
+
+export function getModelsTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.COMMANDCODE_MODELS_TIMEOUT_MS
+  if (!raw) return DEFAULT_MODELS_TIMEOUT_MS
+
+  const parsed = Number(raw)
+  return configuredTimeoutMs(parsed)
+}
+
+class ModelDiscoveryTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Command Code model discovery timed out after ${timeoutMs}ms`)
+    this.name = "ModelDiscoveryTimeoutError"
+  }
+}
+
+function runWithTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  externalSignal: AbortSignal | undefined,
+): Promise<T> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let settled = false
+  let onExternalAbort: (() => void) | undefined
+
+  return new Promise<T>((resolve, reject) => {
+    const cleanup = () => {
+      if (timer !== undefined) clearTimeout(timer)
+      if (onExternalAbort && externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort)
+      }
+    }
+
+    const resolveOnce = (value: T) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(value)
+    }
+
+    const rejectOnce = (error: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+
+    const abort = (reason: unknown) => {
+      const error = abortError(reason)
+      controller.abort(error)
+      rejectOnce(error)
+    }
+
+    if (externalSignal?.aborted) {
+      abort(externalSignal.reason)
+      return
+    }
+
+    onExternalAbort = () => abort(externalSignal?.reason)
+    externalSignal?.addEventListener("abort", onExternalAbort, { once: true })
+    timer = setTimeout(() => abort(new ModelDiscoveryTimeoutError(timeoutMs)), timeoutMs)
+
+    Promise.resolve()
+      .then(() => operation(controller.signal))
+      .then(resolveOnce, rejectOnce)
+  })
+}
+
 export function commandCodeModelsFromApiResponse(value: unknown): readonly CommandCodeModel[] {
   if (!isRecord(value)) throw new Error("Expected models response to be an object")
   if (value.object !== "list") throw new Error("Expected models response object to be 'list'")
@@ -102,7 +272,7 @@ export function commandCodeModelsFromApiResponse(value: unknown): readonly Comma
   return data.map(parseApiModel).map((model) => ({
     id: model.id,
     name: `${model.name} (CC)`,
-    reasoning: true,
+    reasoning: isReasoningModel(model.id),
     contextWindow: model.contextLength,
     maxTokens: Math.min(model.contextLength, DEFAULT_MAX_OUTPUT_TOKENS),
   }))
@@ -123,19 +293,26 @@ export async function fetchCommandCodeModels(
 ): Promise<readonly CommandCodeModel[]> {
   const url = options.url ?? DEFAULT_MODELS_URL
   const fetchImpl = options.fetchImpl ?? fetch
-  const response = await fetchImpl(url, {
-    headers: {
-      accept: "application/json",
+  const body: unknown = await runWithTimeout(
+    async (signal) => {
+      const response = await fetchImpl(url, {
+        headers: {
+          accept: "application/json",
+        },
+        signal,
+      })
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch Command Code models: ${response.status} ${response.statusText}`,
+        )
+      }
+
+      return await response.json()
     },
-  })
-
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch Command Code models: ${response.status} ${response.statusText}`,
-    )
-  }
-
-  const body: unknown = await response.json()
+    configuredTimeoutMs(options.timeoutMs),
+    options.signal,
+  )
   return requireModels(commandCodeModelsFromApiResponse(body))
 }
 
@@ -187,6 +364,8 @@ export async function loadCommandCodeModels(
       }
     }
   } catch (liveError) {
+    if (options.signal?.aborted) throw abortError(options.signal.reason ?? liveError)
+
     try {
       const models = await readCommandCodeModelsCache(cachePath)
       return {
@@ -198,7 +377,7 @@ export async function loadCommandCodeModels(
       return {
         models: [],
         source: "empty",
-        warning: `Could not refresh the Command Code model catalog (${errorMessage(liveError)}), and no valid cached catalog is available at ${cachePath} (${errorMessage(cacheError)}). Command Code models will remain unavailable until /reload succeeds.`,
+        warning: `Could not refresh the Command Code model catalog (${errorMessage(liveError)}), and no valid cached catalog is available at ${cachePath} (${errorMessage(cacheError)}). Command Code models will remain unavailable until /commandcode-refresh succeeds.`,
       }
     }
   }
