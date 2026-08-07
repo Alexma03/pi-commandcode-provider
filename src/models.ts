@@ -14,13 +14,15 @@ type CommandCodeReasoningEffort = Exclude<PiThinkingLevel, "off">
 /**
  * Per-model reasoning efforts supported by Command Code's generate endpoint.
  *
- * The Provider API does not expose reasoning metadata. These entries are
- * maintained from the official Command Code CLI model catalog, so a model is
- * marked reasoning-capable only when its upstream effort support is known.
+ * The Provider API does not expose reasoning metadata. This is an exact
+ * snapshot of `reasoningEfforts` from the command-code@1.14.1 model catalog
+ * (`packages/shared/src/model-catalog.ts`, also published in the generated
+ * `dist/bundled/command-code-knowledge/reference/models.md`). Models omitted
+ * here let Command Code choose their reasoning depth, matching the CLI.
  */
 export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {
+  "Qwen/Qwen3.8-Max": ["low", "medium", "xhigh"],
   "claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
-  "claude-haiku-4-5-20251001": ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
   "claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
@@ -39,11 +41,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasonin
   "google/gemini-3.5-flash": ["low", "medium", "high"],
   "google/gemini-3.5-flash-lite": ["low", "medium", "high"],
   "google/gemini-3.6-flash": ["low", "medium", "high"],
-  "meta/muse-spark-1.1": ["low", "medium", "high"],
-  "moonshotai/Kimi-K2.5": ["high", "max"],
-  "moonshotai/Kimi-K2.6": ["high", "max"],
   "sakana/fugu-ultra": ["high", "xhigh"],
-  "tencent/hy3-paid": ["low", "medium", "high"],
   "xai/grok-4.5": ["low", "medium", "high"],
   "zai-org/GLM-5.2": ["high", "max"],
 }
@@ -72,22 +70,21 @@ export function thinkingLevelMapForEfforts(
 export interface ThinkingMetadata {
   thinkingLevelMap: Partial<Record<PiThinkingLevel, string | null>>
   thinking: {
-    effortMap: Partial<Record<PiThinkingLevel, string | null>>
+    mode: "effort"
+    effortMap: Partial<Record<CommandCodeReasoningEffort, string>>
     efforts: readonly CommandCodeReasoningEffort[]
-    defaultLevel: CommandCodeReasoningEffort
   }
 }
 
 export function thinkingMetadataForModel(modelId: string): ThinkingMetadata | undefined {
   const efforts = MODEL_EFFORTS[modelId]
   if (!efforts) return undefined
-  const effortMap = thinkingLevelMapForEfforts(efforts)
   return {
-    thinkingLevelMap: effortMap,
+    thinkingLevelMap: thinkingLevelMapForEfforts(efforts),
     thinking: {
-      effortMap,
+      mode: "effort",
+      effortMap: Object.fromEntries(efforts.map((effort) => [effort, effort])),
       efforts,
-      defaultLevel: efforts[efforts.length - 2] ?? efforts[0],
     },
   }
 }
