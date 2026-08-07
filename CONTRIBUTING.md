@@ -21,7 +21,29 @@ npm run test:models
 npm run test:oauth
 npm run test:abort
 npm run test:stream
+npm run test:pi-isolated
+npm run test:pi-authenticated
 npm run test:pi-local
+```
+
+Start pi with only the current checkout installed in temporary config and session directories, without inheriting Command Code credentials:
+
+```sh
+npm run pi:isolated
+```
+
+Run `/login` inside pi. The temporary credential and sessions are deleted when pi exits.
+
+To use the current checkout with your existing pi credentials and expose only Command Code models in the model picker:
+
+```sh
+npm run pi:authenticated
+```
+
+Both launchers default to `commandcode/gpt-5.6-luna`. Pass additional pi arguments after `--` to override defaults or change startup behavior:
+
+```sh
+npm run pi:authenticated -- --model claude-sonnet-4-6
 ```
 
 Before opening a PR, run:

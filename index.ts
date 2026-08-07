@@ -16,10 +16,11 @@ import { AssistantMessageEventStream } from "@earendil-works/pi-ai"
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { join } from "node:path"
 
+import { getApiKey as getStoredApiKey } from "./src/converters.ts"
 import { COMMAND_CODE_CLI_VERSION, createStreamCommandCode, DEFAULT_API_BASE } from "./src/core.ts"
 import { calculateCommandCodeCost } from "./src/cost.ts"
 import { DEFAULT_MODELS_URL, loadCommandCodeModels } from "./src/models.ts"
-import { getApiKey, login, refreshToken } from "./src/oauth.ts"
+import { getApiKey as getOAuthApiKey, login, refreshToken } from "./src/oauth.ts"
 
 const API_BASE = process.env.COMMANDCODE_API_BASE ?? DEFAULT_API_BASE
 const MODELS_URL = process.env.COMMANDCODE_MODELS_URL ?? DEFAULT_MODELS_URL
@@ -82,6 +83,7 @@ const streamCommandCode = createStreamCommandCode({
 // ---------------------------------------------------------------------------
 
 export default async function (pi: ExtensionAPI) {
+  const storedApiKey = getStoredApiKey()
   const { models, warning } = await loadCommandCodeModels({
     url: MODELS_URL,
     cachePath: MODELS_CACHE_PATH,
@@ -92,7 +94,7 @@ export default async function (pi: ExtensionAPI) {
   pi.registerProvider("commandcode", {
     name: "Command Code",
     baseUrl: API_BASE,
-    apiKey: "$COMMANDCODE_API_KEY",
+    apiKey: storedApiKey,
     authHeader: true,
     api: "commandcode-custom",
     streamSimple: streamCommandCode,
@@ -104,7 +106,7 @@ export default async function (pi: ExtensionAPI) {
       name: "Command Code",
       login,
       refreshToken,
-      getApiKey,
+      getApiKey: getOAuthApiKey,
     },
     models: models.map((model) => ({
       id: model.id,

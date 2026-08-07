@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add repository commands for testing the current checkout either in a logged-out, automatically cleaned-up pi environment or with existing credentials and only Command Code models enabled.
 - Use the host-provided `pi-ai` and `pi-coding-agent` core packages instead of installing private runtime copies, including for local and out-of-store development checkouts.
 
 ## 0.4.4 - 2026-08-03
