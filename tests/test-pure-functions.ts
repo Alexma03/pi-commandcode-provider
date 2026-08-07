@@ -499,10 +499,47 @@ describe("messagesToCC()", () => {
 
     assert.equal(objectAt(result, ["0", "role"]), "user")
     assert.equal(objectAt(result, ["1", "role"]), "assistant")
-    assert.equal(objectAt(result, ["1", "content", "0", "type"]), "reasoning")
-    assert.equal(objectAt(result, ["1", "content", "2", "type"]), "tool-call")
+    assert.equal(objectAt(result, ["1", "content", "0", "type"]), "text")
+    assert.equal(objectAt(result, ["1", "content", "1", "type"]), "tool-call")
+    assert.equal(objectAt(result, ["1", "content", "2"]), undefined)
     assert.equal(objectAt(result, ["2", "role"]), "tool")
     assert.equal(objectAt(result, ["2", "content", "0", "output", "value"]), "hello\nworld")
+  })
+
+  it("drops previous assistant reasoning while preserving text and tool calls", () => {
+    const result = messagesToCC([
+      { role: "user", content: "first question" },
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "private reasoning from turn one" },
+          { type: "text", text: "first answer" },
+        ],
+      },
+      { role: "user", content: "follow-up question" },
+    ])
+
+    assert.deepEqual(result, [
+      { role: "user", content: "first question" },
+      { role: "assistant", content: [{ type: "text", text: "first answer" }] },
+      { role: "user", content: "follow-up question" },
+    ])
+  })
+
+  it("omits assistant turns that contain only previous reasoning", () => {
+    const result = messagesToCC([
+      { role: "user", content: "first question" },
+      {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "private reasoning" }],
+      },
+      { role: "user", content: "follow-up question" },
+    ])
+
+    assert.deepEqual(result, [
+      { role: "user", content: "first question" },
+      { role: "user", content: "follow-up question" },
+    ])
   })
 
   it("drops orphaned tool calls that have no matching tool result", () => {

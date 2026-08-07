@@ -187,6 +187,51 @@ try {
   assert.equal(reasoning.code, 0, reasoning.stderr)
   assert.match(reasoning.stdout, new RegExp(marker))
 
+  console.log("[live-e2e] live multi-turn reasoning history")
+  const multiTurn = await runRpc(extensionPath, async ({ send, waitFor, events, getStderr }) => {
+    const countThinkingDeltas = (startIndex) =>
+      events
+        .slice(startIndex)
+        .filter(
+          (event) =>
+            event.type === "message_update" &&
+            event.assistantMessageEvent?.type === "thinking_delta" &&
+            typeof event.assistantMessageEvent.delta === "string" &&
+            event.assistantMessageEvent.delta.length > 0,
+        ).length
+
+    const firstStart = events.length
+    send({
+      id: "reasoning-turn-1",
+      type: "prompt",
+      message:
+        "Reason step by step before answering. Calculate 37 * 41, then reply with only the number.",
+    })
+    await waitFor(
+      (event) => event.type === "response" && event.id === "reasoning-turn-1" && event.success,
+    )
+    await waitFor((event) => event.type === "agent_settled")
+    const firstThinkingDeltas = countThinkingDeltas(firstStart)
+
+    const secondStart = events.length
+    send({
+      id: "reasoning-turn-2",
+      type: "prompt",
+      message:
+        "Now reason step by step again. Add 19 to your previous numeric result, then reply with only the number.",
+    })
+    await waitFor(
+      (event) => event.type === "response" && event.id === "reasoning-turn-2" && event.success,
+    )
+    await waitFor((event) => event.type === "agent_settled" && events.indexOf(event) >= secondStart)
+    const secondThinkingDeltas = countThinkingDeltas(secondStart)
+
+    return { firstThinkingDeltas, secondThinkingDeltas, stderr: getStderr() }
+  })
+  assert.ok(multiTurn.firstThinkingDeltas > 0, "first turn should stream reasoning")
+  assert.ok(multiTurn.secondThinkingDeltas > 0, "follow-up turn should stream fresh reasoning")
+  assert.doesNotMatch(multiTurn.stderr, /Bearer\s+\S+/i)
+
   console.log("[live-e2e] live runtime refresh/status commands")
   const runtime = await runRpc(extensionPath, async ({ send, waitFor, getStderr }) => {
     send({ id: "commands", type: "get_commands" })
