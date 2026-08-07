@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add `/commandcode-refresh` and `/commandcode-status` commands for safe model-catalog refreshes and redacted diagnostics.
+- Bound model discovery to a configurable 10-second timeout so a slow Provider API cannot block pi startup; timed-out discovery uses the validated cache when available.
+- Normalize Command Code context overflow failures so pi can auto-compact and retry, while leaving unrelated rate-limit and capacity errors unchanged.
+- Keep the legacy `/alpha/generate` integration explicitly text-only: image input and image tool results are rejected instead of being silently dropped, and models do not claim image capability until the protocol exposes documented support and limits.
+- Replace blanket reasoning metadata with model-specific Command Code effort support. Known models expose a `thinkingLevelMap`, and selected supported Pi levels are forwarded as `params.reasoning_effort`; unsupported or unknown models do not receive reasoning request fields.
 - Add repository commands for testing the current checkout either in a logged-out, automatically cleaned-up pi environment or with existing credentials and only Command Code models enabled.
 - Refresh display pricing for the current Command Code model catalog, remove expired Qwen promotional rates, add current free and discounted models, and require review when temporary prices expire.
 - Use the host-provided `pi-ai` and `pi-coding-agent` core packages instead of installing private runtime copies, including for local and out-of-store development checkouts.
