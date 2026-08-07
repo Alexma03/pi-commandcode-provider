@@ -147,6 +147,22 @@ omp plugin uninstall pi-commandcode-provider
 
 ## Development
 
+Start an isolated pi instance with only the current checkout installed and no existing Command Code credentials:
+
+```sh
+npm run pi:isolated
+```
+
+Run `/login` inside pi. Temporary credentials, configuration, and sessions are deleted when pi exits.
+
+Start the current checkout with your existing pi credentials and only Command Code models in the model picker:
+
+```sh
+npm run pi:authenticated
+```
+
+Both commands accept additional pi arguments after `--`, for example `npm run pi:authenticated -- --model claude-sonnet-4-6`.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and tests. See [RELEASE.md](RELEASE.md) for the release process.
 
 ## License

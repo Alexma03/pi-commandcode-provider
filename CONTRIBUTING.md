@@ -21,8 +21,26 @@ npm run test:models
 npm run test:oauth
 npm run test:abort
 npm run test:stream
+npm run test:pi-isolated
+npm run test:pi-authenticated
 npm run test:pi-local
 ```
+
+Start an isolated pi instance with only the current checkout installed and no existing Command Code credentials:
+
+```sh
+npm run pi:isolated
+```
+
+Run `/login` inside pi. Temporary credentials, configuration, and sessions are deleted when pi exits.
+
+Start the current checkout with your existing pi credentials and only Command Code models in the model picker:
+
+```sh
+npm run pi:authenticated
+```
+
+Both commands accept additional pi arguments after `--`, for example `npm run pi:authenticated -- --model claude-sonnet-4-6`.
 
 Before opening a PR, run:
 
