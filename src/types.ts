@@ -72,6 +72,13 @@ export interface ModelLike {
   provider: string
   maxTokens: number
   cost: ModelCost
+  reasoning?: boolean
+  thinkingLevelMap?: Partial<Record<string, string | null>>
+  thinking?: {
+    effortMap?: Partial<Record<string, string | null>>
+    efforts?: readonly string[]
+    defaultLevel?: string
+  }
 }
 
 export interface MessageLike {
@@ -104,6 +111,8 @@ export interface StreamOptions {
   signal?: AbortSignal
   headers?: Record<string, string>
   maxTokens?: number
+  /** Resolved pi thinking level; forwarded only through the model's map. */
+  reasoning?: string
   onPayload?: (payload: unknown, model: ModelLike) => unknown | Promise<unknown>
   onResponse?: (response: ProviderResponseInfo, model: ModelLike) => void | Promise<void>
   /**

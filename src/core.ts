@@ -134,6 +134,15 @@ function generateMaxTokens(model: ModelLike, options?: StreamOptions): number {
   )
 }
 
+function mappedReasoningEffort(model: ModelLike, options?: StreamOptions): string | undefined {
+  const level = options?.reasoning
+  if (!level || level === "off" || !model.reasoning) return undefined
+
+  const effortMap = model.thinking?.effortMap ?? model.thinkingLevelMap
+  const mapped = effortMap?.[level]
+  return typeof mapped === "string" && mapped !== "off" ? mapped : undefined
+}
+
 export function projectSlugFromPath(pathName: string): string {
   const slug = pathName
     .toLowerCase()
@@ -424,6 +433,7 @@ export function createStreamCommandCode(deps: CoreDependencies) {
 
         const workingDir = cwd()
         const threadId = uuid()
+        const reasoningEffort = mappedReasoningEffort(model, options)
 
         let body: unknown = {
           config: {
@@ -448,6 +458,7 @@ export function createStreamCommandCode(deps: CoreDependencies) {
             max_tokens: generateMaxTokens(model, options),
             temperature: 0.3,
             stream: true,
+            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
           },
           threadId,
         }

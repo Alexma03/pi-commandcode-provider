@@ -277,9 +277,12 @@ try {
   )
   assert.equal(firstOfflineList.code, 0, firstOfflineList.stderr)
   assert.doesNotMatch(firstOfflineList.stderr, /Failed to load extension/)
-  assert.match(firstOfflineList.stdout || firstOfflineList.stderr, /No models matching/)
+  assert.match(
+    firstOfflineList.stdout || firstOfflineList.stderr,
+    /No models matching|No models available/,
+  )
   assert.match(firstOfflineList.stderr, /no valid cached catalog/)
-  assert.match(firstOfflineList.stderr, /until \/reload succeeds/)
+  assert.match(firstOfflineList.stderr, /until \/commandcode-refresh succeeds/)
   assert.throws(() => accessSync(modelsCachePath, constants.R_OK), /ENOENT|no such file/i)
 
   // A fresh process re-runs the extension entrypoint, which is the same path /reload uses.

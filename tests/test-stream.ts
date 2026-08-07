@@ -7,6 +7,7 @@ import assert from "node:assert/strict"
 import { after, before, beforeEach, describe, it } from "node:test"
 
 import type { AssistantMessageEvent } from "../src/core.ts"
+import { MODEL_EFFORTS, thinkingLevelMapForEfforts } from "../src/models.ts"
 import {
   collectEvents,
   createTestDeps,
@@ -413,6 +414,84 @@ describe("streamCommandCode — request serialization", () => {
     assert.equal(headers["x-taste-learning"], "true")
     assert.equal(headers["x-co-flag"], "false")
     assert.equal(headers["x-session-id"], undefined)
+  })
+
+  it("accepts the legacy OMP nested reasoning map", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [JSON.stringify({ type: "finish", finishReason: "stop" })],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+    const model = makeModel({
+      id: "omp-compat-reasoning-model",
+      reasoning: true,
+      thinking: { effortMap: { high: "legacy-high" } },
+    })
+
+    await collectEvents(
+      streamCommandCode(model, makeContext(), { apiKey: "mock-key", reasoning: "high" }),
+    )
+
+    assert.equal(objectAt(server.lastRequestBody(), ["params", "reasoning_effort"]), "legacy-high")
+  })
+
+  it("forwards a supported Pi reasoning level as reasoning_effort", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [JSON.stringify({ type: "finish", finishReason: "stop" })],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+    const model = makeModel({
+      id: "deepseek/deepseek-v4-flash",
+      reasoning: true,
+      thinkingLevelMap: thinkingLevelMapForEfforts(MODEL_EFFORTS["deepseek/deepseek-v4-flash"]),
+    })
+
+    await collectEvents(
+      streamCommandCode(model, makeContext(), { apiKey: "mock-key", reasoning: "max" }),
+    )
+
+    assert.equal(objectAt(server.lastRequestBody(), ["params", "reasoning_effort"]), "max")
+  })
+
+  it("omits reasoning_effort for off, unsupported, and unknown reasoning levels", async () => {
+    const model = makeModel({
+      id: "deepseek/deepseek-v4-flash",
+      reasoning: true,
+      thinkingLevelMap: thinkingLevelMapForEfforts(MODEL_EFFORTS["deepseek/deepseek-v4-flash"]),
+    })
+
+    for (const reasoning of ["off", "low"] as const) {
+      server.mockResponse({
+        type: "success",
+        events: [JSON.stringify({ type: "finish", finishReason: "stop" })],
+      })
+      const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+      await collectEvents(
+        streamCommandCode(model, makeContext(), { apiKey: "mock-key", reasoning }),
+      )
+      assert.equal(
+        objectAt(server.lastRequestBody(), ["params", "reasoning_effort"]),
+        undefined,
+        `${reasoning} should not be sent when it has no supported Command Code field`,
+      )
+      server.reset()
+    }
+
+    server.mockResponse({
+      type: "success",
+      events: [JSON.stringify({ type: "finish", finishReason: "stop" })],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+    await collectEvents(
+      streamCommandCode(
+        makeModel({ id: "new-model-without-metadata", reasoning: false }),
+        makeContext(),
+        { apiKey: "mock-key", reasoning: "high" },
+      ),
+    )
+    assert.equal(objectAt(server.lastRequestBody(), ["params", "reasoning_effort"]), undefined)
   })
 
   it("caps maxTokens and passes custom headers", async () => {
