@@ -190,6 +190,26 @@ npm run pi:authenticated
 
 Both commands accept additional pi arguments after `--`, for example `npm run pi:authenticated -- --model claude-sonnet-4-6`.
 
+### Live transport tests
+
+Keep the Go-plan and Provider-API test keys in separate secret-manager entries. Pass them through protected files so the keys do not enter shell history:
+
+```sh
+COMMANDCODE_E2E_GO_API_KEY_FILE=/path/to/go-key \
+  npm run test:e2e:live:go
+
+COMMANDCODE_E2E_PROVIDER_API_KEY_FILE=/path/to/provider-key \
+  npm run test:e2e:live:provider
+
+COMMANDCODE_E2E_GO_API_KEY_FILE=/path/to/go-key \
+COMMANDCODE_E2E_PROVIDER_API_KEY_FILE=/path/to/provider-key \
+  npm run test:e2e:live:all
+```
+
+Each profile runs with an isolated Pi agent directory and asserts the selected transport through `/commandcode-status`: Go must select `generate`, while a Provider API account must select `provider`. The profile-specific `*_API_KEY` environment variables are also supported for CI secrets, but key files are preferred for local use.
+
+Override the default DeepSeek test model with `COMMANDCODE_E2E_GO_MODEL` or `COMMANDCODE_E2E_PROVIDER_MODEL`. A successful live Anthropic `/provider/v1/messages` test requires a Provider API account whose plan includes the selected Claude model.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and tests. See [RELEASE.md](RELEASE.md) for the release process.
 
 ## License
