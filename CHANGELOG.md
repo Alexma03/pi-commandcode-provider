@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Replace the reverse-engineered `/alpha/generate` integration with Command Code's documented Provider API: `/provider/v1/chat/completions` for non-Claude models and `/provider/v1/messages` for Claude models.
+- Use Pi's native OpenAI- and Anthropic-compatible providers for streaming, tools, reasoning, images, usage, errors, and retries while preserving dynamic model discovery, offline cache, refresh/status commands, pricing, and OAuth credentials.
+- Let `/login` use browser authentication, an explicit API-key prompt, or a directly pasted API key.
+- Add optional zero-data-retention headers through `CMD_ZDR=1` or `COMMANDCODE_ZDR=1`.
+- Refresh GPT-5.6 Terra and Luna display prices after their temporary 50% promotion ended.
+
 ## 0.5.1 - 2026-08-11
 
 - Add model-specific image input capabilities from the `command-code@1.15.1` catalog and forward user and tool-result images using the current Command Code wire format.

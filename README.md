@@ -5,7 +5,15 @@
 
 A custom provider for [pi](https://github.com/earendil-works/pi) that connects to the [Command Code](https://commandcode.ai) Provider API.
 
-> **Disclaimer:** This is an unofficial, community-maintained integration. It is not affiliated with, endorsed by, or supported by Command Code. You need your own Command Code account and API key or subscription. Command Code's terms, availability, and pricing apply.
+> **Disclaimer:** This is an unofficial, community-maintained integration. It is not affiliated with, endorsed by, or supported by Command Code. You need your own Command Code account, API key, and a plan with Provider API access. Command Code's terms, availability, and pricing apply.
+
+The extension uses only Command Code's documented Provider API endpoints:
+
+- `GET /provider/v1/models`
+- `POST /provider/v1/chat/completions` for non-Claude models
+- `POST /provider/v1/messages` for Claude models
+
+Every current Command Code plan except **Go** has Provider API access: GOAT, Pro, Max, Team, and Provider.
 
 ## Install
 
@@ -19,7 +27,7 @@ Start or reload pi, then authenticate:
 /login
 ```
 
-Select **Use a subscription**, then **Command Code**. Complete the browser flow and choose a model with `/model`.
+Select **Use a subscription**, then **Command Code**. Choose browser login or paste an API key, then select a model with `/model`.
 
 ## Oh My Pi
 
@@ -33,9 +41,9 @@ Restart OMP or run `/reload`, then use `/login` and select **Use a subscription*
 
 ## Authentication
 
-### Browser login
+### Login dialog
 
-Run `/login` in pi or OMP. Select **Use a subscription**, then **Command Code**. The browser flow stores the returned credential in the host's auth file.
+Run `/login` in pi or OMP. Select **Use a subscription**, then **Command Code**. Press Enter for browser login, type `key` to open a paste prompt, or paste the API key directly. The selected credential is stored in the host's auth file.
 
 <img width="1520" height="554" alt="Select Command Code in pi's login dialog" src="https://github.com/user-attachments/assets/071e929a-6f49-4803-bfec-7a31368fb12a" />
 
@@ -84,9 +92,7 @@ Open `/model` and select one of the models provided by Command Code. Model avail
 
 ### Reasoning support
 
-Reasoning metadata is enriched only for models whose Command Code effort support is known. Those models register a model-specific `thinkingLevelMap`, so pi and OMP expose only supported levels. A selected supported level is sent as the documented `params.reasoning_effort` field; `off`, unsupported levels, and newly discovered models without metadata do not add reasoning fields to the request. No prompt instructions are injected.
-
-Reasoning blocks from completed assistant turns remain visible in pi's local session, but are not replayed to Command Code in later requests. Only the assistant's user-visible text and completed tool calls are sent back as history. This matches the current Command Code CLI behavior and prevents prior private reasoning traces from interfering with reasoning on follow-up turns.
+Reasoning metadata is enriched only for models whose Command Code effort support is known. Those models register a model-specific `thinkingLevelMap`, so pi and OMP expose only supported levels. Pi's native OpenAI- and Anthropic-compatible providers translate the selected level to the endpoint's documented reasoning fields. Unsupported levels and newly discovered models without metadata do not claim reasoning support.
 
 List Command Code models from the terminal:
 
@@ -123,6 +129,8 @@ While pi is running, use these provider commands without restarting:
 - `/commandcode-refresh` fetches and re-registers the current model catalog. Overlapping refreshes are coalesced, and a failed refresh keeps the last valid catalog active.
 - `/commandcode-status` shows redacted discovery diagnostics, including the source, model count, timestamps, cache path, endpoint, and warning.
 
+Set `CMD_ZDR=1` or `COMMANDCODE_ZDR=1` to send Command Code's documented `x-cmd-zdr: 1` zero-data-retention header.
+
 The following environment variables are intended for tests, local mocks, and compatible API endpoints:
 
 - `COMMANDCODE_API_BASE`
@@ -134,7 +142,7 @@ The following environment variables are intended for tests, local mocks, and com
 
 The provider advertises image input only for models marked with the `image` input modality in the official Command Code CLI model catalog. The capability snapshot currently follows `command-code@1.15.1`; unknown models default to text-only until their upstream metadata is reviewed.
 
-For vision-capable models, image blocks from user messages and tool results are forwarded in Command Code's current data-URL wire format. Text-only models reject image content before making a network request instead of silently dropping it.
+For vision-capable models, Pi's native provider adapters forward image blocks from user messages and tool results using the documented OpenAI or Anthropic message schema. Unknown and text-only models remain marked text-only in Pi.
 
 ## Pricing display
 
