@@ -8,6 +8,7 @@
 - Let `/login` use browser authentication, an explicit API-key prompt, or a directly pasted API key.
 - Add optional zero-data-retention headers through `COMMANDCODE_ZDR=1`.
 - Refresh GPT-5.6 Terra and Luna display prices after their temporary 50% promotion ended.
+- Add isolated live E2E profiles for separate Go-plan and Provider-API credentials, including an explicit selected-transport assertion and packed-package validation.
 
 ## 0.5.1 - 2026-08-11
 

@@ -51,6 +51,9 @@
     "test:pi-local": "node tests/test-pi-local.mjs",
     "test:smoke": "node tests/test-smoke.mjs",
     "test:e2e:live": "node tests/test-live-e2e.mjs",
+    "test:e2e:live:go": "node scripts/live-e2e-profile.mjs go",
+    "test:e2e:live:provider": "node scripts/live-e2e-profile.mjs provider",
+    "test:e2e:live:all": "node scripts/live-e2e-profile.mjs go provider",
     "test:cost": "tsx tests/test-cost.ts"
   },
   "pi": {

@@ -98,6 +98,7 @@ describe("Command Code runtime", () => {
       cachePath: "/tmp/commandcode-models.json",
       loadModels: () => firstLoad.promise,
       createProviderConfig: (models) => ({ models }),
+      getTransport: () => "provider",
       now: () => now,
       logWarning: () => {},
     })
@@ -115,6 +116,7 @@ describe("Command Code runtime", () => {
     assert.ok(statusCommand)
     await statusCommand("", context)
     const statusMessage = context.notifications.at(-1)?.message ?? ""
+    assert.match(statusMessage, /transport: provider/)
     assert.match(statusMessage, /source: live/)
     assert.match(statusMessage, /model count: 1/)
     assert.match(statusMessage, /last success:/)
