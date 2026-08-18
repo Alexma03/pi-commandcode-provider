@@ -7,13 +7,14 @@ A custom provider for [pi](https://github.com/earendil-works/pi) that connects t
 
 > **Disclaimer:** This is an unofficial, community-maintained integration. It is not affiliated with, endorsed by, or supported by Command Code. You need your own Command Code account, API key, and a plan with Provider API access. Command Code's terms, availability, and pricing apply.
 
-The extension uses only Command Code's documented Provider API endpoints:
+The extension uses one provider and automatically selects the transport supported by the authenticated account:
 
-- `GET /provider/v1/models`
-- `POST /provider/v1/chat/completions` for non-Claude models
-- `POST /provider/v1/messages` for Claude models
+- `GET /provider/v1/models` for model discovery
+- `POST /provider/v1/chat/completions` for non-Claude models with Provider API access
+- `POST /provider/v1/messages` for Claude models with Provider API access
+- `/alpha/generate` after the Provider API explicitly returns `403 upgrade_required`, which currently identifies Go-plan accounts
 
-Every current Command Code plan except **Go** has Provider API access: GOAT, Pro, Max, Team, and Provider.
+The detected transport is remembered only for the running process and is re-evaluated when the credential changes. Other authentication, permission, rate-limit, network, and server errors never trigger the fallback.
 
 ## Install
 
@@ -92,7 +93,7 @@ Open `/model` and select one of the models provided by Command Code. Model avail
 
 ### Reasoning support
 
-Reasoning metadata is enriched only for models whose Command Code effort support is known. Those models register a model-specific `thinkingLevelMap`, so pi and OMP expose only supported levels. Pi's native OpenAI- and Anthropic-compatible providers translate the selected level to the endpoint's documented reasoning fields. Unsupported levels and newly discovered models without metadata do not claim reasoning support.
+Reasoning metadata is enriched only for models whose Command Code effort support is known. Those models register a model-specific `thinkingLevelMap`, so pi and OMP expose only supported levels. Pi's native OpenAI- and Anthropic-compatible providers translate the selected level for Provider API accounts; the existing Command Code generate transport sends the matching `reasoning_effort` for Go accounts. Unsupported levels and newly discovered models without metadata do not claim reasoning support.
 
 List Command Code models from the terminal:
 

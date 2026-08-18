@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Replace the reverse-engineered `/alpha/generate` integration with Command Code's documented Provider API: `/provider/v1/chat/completions` for non-Claude models and `/provider/v1/messages` for Claude models.
-- Use Pi's native OpenAI- and Anthropic-compatible providers for streaming, tools, reasoning, images, usage, errors, and retries while preserving dynamic model discovery, offline cache, refresh/status commands, pricing, and OAuth credentials.
+- Prefer Command Code's Provider API (`/provider/v1/chat/completions` and `/provider/v1/messages`) and automatically fall back to the existing `/alpha/generate` transport only when the Provider API returns `403 upgrade_required` for a Go-plan account.
+- Remember the detected transport for the running process, re-detect it when credentials change, and never fall back for unrelated authentication, permission, rate-limit, network, or server failures.
+- Use Pi's native OpenAI- and Anthropic-compatible providers for Provider API streaming while preserving the existing hardened generate transport, dynamic model discovery, offline cache, refresh/status commands, pricing, and OAuth credentials.
 - Let `/login` use browser authentication, an explicit API-key prompt, or a directly pasted API key.
 - Add optional zero-data-retention headers through `COMMANDCODE_ZDR=1`.
 - Refresh GPT-5.6 Terra and Luna display prices after their temporary 50% promotion ended.
