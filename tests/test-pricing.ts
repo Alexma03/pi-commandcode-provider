@@ -148,16 +148,22 @@ describe("MODEL_COSTS pricing overlay", () => {
       cacheWrite: 0.038,
     })
     assertCost("gpt-5.6-terra", {
-      input: 1,
-      output: 6,
-      cacheRead: 0.1,
-      cacheWrite: 1.25,
+      input: 2,
+      output: 12,
+      cacheRead: 0.2,
+      cacheWrite: 2.5,
+    })
+    assertCost("gpt-5.6-luna", {
+      input: 0.2,
+      output: 1.2,
+      cacheRead: 0.02,
+      cacheWrite: 0.25,
     })
   })
 
   it("tracks pricing provenance", () => {
     assert.equal(PRICING_SOURCE_URL, "https://commandcode.ai/docs/resources/pricing-limits")
-    assert.equal(PRICING_LAST_VERIFIED, "2026-08-04")
+    assert.equal(PRICING_LAST_VERIFIED, "2026-08-18")
   })
 
   it("fails once temporary pricing needs review", () => {

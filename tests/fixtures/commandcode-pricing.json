@@ -1,5 +1,5 @@
 {
-  "verifiedAt": "2026-08-04",
+  "verifiedAt": "2026-08-18",
   "source": "https://commandcode.ai/docs/resources/pricing-limits",
   "tierPolicy": "Use request-wide input tiers; the highest threshold exceeded by input plus cache tokens applies to the full request.",
   "tiers": {
@@ -7,9 +7,7 @@
     "Qwen/Qwen3.7-Flash": [
       [32000, 0.1, 0.4, 0.02, 0.125],
       [256000, 0.2, 0.8, 0.04, 0.25]
-    ],
-    "gpt-5.6-terra": [[272000, 2, 9, 0.2, 2.5]],
-    "gpt-5.6-luna": [[272000, 0.2, 0.9, 0.02, 0.25]]
+    ]
   },
   "costs": {
     "poolside/laguna-s-2.1-free": [0, 0, 0, 0],
@@ -52,8 +50,8 @@
     "claude-opus-4-7": [5, 25, 0.5, 6.25],
     "claude-haiku-4-5-20251001": [1, 5, 0.1, 1.25],
     "gpt-5.6-sol": [5, 30, 0.5, 6.25],
-    "gpt-5.6-terra": [1, 6, 0.1, 1.25],
-    "gpt-5.6-luna": [0.1, 0.6, 0.01, 0.125],
+    "gpt-5.6-terra": [2, 12, 0.2, 2.5],
+    "gpt-5.6-luna": [0.2, 1.2, 0.02, 0.25],
     "gpt-5.5": [5, 30, 0.5, 0],
     "gpt-5.4": [2.5, 15, 0.25, 0],
     "gpt-5.3-codex": [2, 8, 0.5, 0],

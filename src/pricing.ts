@@ -20,7 +20,7 @@ export interface TemporaryPricing {
 }
 
 export const PRICING_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const PRICING_LAST_VERIFIED = "2026-08-04"
+export const PRICING_LAST_VERIFIED = "2026-08-18"
 
 export const ZERO_MODEL_COST: CommandCodeModelCost = {
   input: 0,
@@ -158,37 +158,8 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
 
   // OpenAI
   "gpt-5.6-sol": { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
-  // Discounted rates through 2026-08-14.
-  "gpt-5.6-terra": {
-    input: 1,
-    output: 6,
-    cacheRead: 0.1,
-    cacheWrite: 1.25,
-    tiers: [
-      {
-        inputTokensAbove: 272_000,
-        input: 2,
-        output: 9,
-        cacheRead: 0.2,
-        cacheWrite: 2.5,
-      },
-    ],
-  },
-  "gpt-5.6-luna": {
-    input: 0.1,
-    output: 0.6,
-    cacheRead: 0.01,
-    cacheWrite: 0.125,
-    tiers: [
-      {
-        inputTokensAbove: 272_000,
-        input: 0.2,
-        output: 0.9,
-        cacheRead: 0.02,
-        cacheWrite: 0.25,
-      },
-    ],
-  },
+  "gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.5 },
+  "gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
   "gpt-5.5": { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
   "gpt-5.4": { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 },
   "gpt-5.3-codex": { input: 2, output: 8, cacheRead: 0.5, cacheWrite: 0 },
@@ -213,11 +184,6 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
 }
 
 export const TEMPORARY_PRICING: readonly TemporaryPricing[] = [
-  {
-    models: ["gpt-5.6-terra", "gpt-5.6-luna"],
-    expiresOn: "2026-08-14",
-    description: "50% promotional rates",
-  },
   {
     models: ["claude-sonnet-5"],
     expiresOn: "2026-08-31",
