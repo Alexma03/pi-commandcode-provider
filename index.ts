@@ -5,6 +5,8 @@
  * https://api.commandcode.ai/provider/v1
  */
 
+import { AssistantMessageEventStream } from "@earendil-works/pi-ai"
+import { streamSimple as streamNativeProvider } from "@earendil-works/pi-ai/compat"
 import {
   getAgentDir,
   type ExtensionAPI,
@@ -14,6 +16,8 @@ import {
 import { join } from "node:path"
 
 import { getConfiguredApiKey } from "./src/api-key.ts"
+import { createStreamCommandCode } from "./src/core.ts"
+import { calculateCommandCodeCost } from "./src/cost.ts"
 import {
   baseUrlForModel,
   DEFAULT_MODELS_URL,
@@ -25,8 +29,10 @@ import {
   type CommandCodeModel,
 } from "./src/models.ts"
 import { getApiKey as getOAuthApiKey, login, refreshToken } from "./src/oauth.ts"
+import { normalizeCommandCodeMessage } from "./src/overflow.ts"
 import { MODEL_COSTS, ZERO_MODEL_COST } from "./src/pricing.ts"
 import { createCommandCodeRuntime } from "./src/runtime.ts"
+import { createCommandCodeTransportRouter } from "./src/transport.ts"
 
 function commandCodeHeaders(): Record<string, string> | undefined {
   if (process.env.COMMANDCODE_ZDR === "1") {
@@ -38,6 +44,7 @@ function commandCodeHeaders(): Record<string, string> | undefined {
 function createProviderConfig(
   models: readonly CommandCodeModel[],
   apiBase: string,
+  streamCommandCode: ProviderConfig["streamSimple"],
 ): ProviderConfig {
   const headers = commandCodeHeaders()
   return {
@@ -45,6 +52,7 @@ function createProviderConfig(
     baseUrl: apiBase,
     apiKey: getConfiguredApiKey() ?? "$COMMANDCODE_API_KEY",
     api: "openai-completions",
+    streamSimple: streamCommandCode,
     headers,
     oauth: {
       name: "Command Code",
@@ -82,12 +90,32 @@ function createProviderConfig(
   }
 }
 
+function legacyApiBase(providerApiBase: string): string {
+  return providerApiBase.replace(/\/provider\/v1\/?$/, "")
+}
+
 export default async function (pi: ExtensionAPI) {
   const apiBase = process.env.COMMANDCODE_API_BASE ?? DEFAULT_PROVIDER_API_BASE
   const modelsUrl = process.env.COMMANDCODE_MODELS_URL ?? DEFAULT_MODELS_URL
   const modelsTimeoutMs = getModelsTimeoutMs()
   const modelsCachePath =
     process.env.COMMANDCODE_MODELS_CACHE ?? join(getAgentDir(), "commandcode-models.json")
+  const streamGenerate = createStreamCommandCode({
+    createStream: () => new AssistantMessageEventStream(),
+    calculateCost: calculateCommandCodeCost,
+    apiBase: legacyApiBase(apiBase),
+  })
+  const transport = createCommandCodeTransportRouter({
+    createStream: () => new AssistantMessageEventStream(),
+    streamProvider: streamNativeProvider,
+    streamGenerate,
+  })
+
+  pi.on("message_end", async (event, ctx) => {
+    if (event.message.role !== "assistant") return
+    const normalized = normalizeCommandCodeMessage(event.message, ctx.model?.provider)
+    return normalized ? { message: normalized.message } : undefined
+  })
 
   const runtime = createCommandCodeRuntime<ProviderConfig, ExtensionCommandContext>(pi, {
     endpoint: modelsUrl,
@@ -98,7 +126,7 @@ export default async function (pi: ExtensionAPI) {
         cachePath: modelsCachePath,
         timeoutMs: modelsTimeoutMs,
       }),
-    createProviderConfig: (models) => createProviderConfig(models, apiBase),
+    createProviderConfig: (models) => createProviderConfig(models, apiBase, transport.stream),
   })
 
   await runtime.initialize()
