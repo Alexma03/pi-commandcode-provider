@@ -1,7 +1,9 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
+import type { Api } from "@earendil-works/pi-ai"
 
-export const DEFAULT_MODELS_URL = "https://api.commandcode.ai/provider/v1/models"
+export const DEFAULT_PROVIDER_API_BASE = "https://api.commandcode.ai/provider/v1"
+export const DEFAULT_MODELS_URL = `${DEFAULT_PROVIDER_API_BASE}/models`
 export const DEFAULT_MODELS_TIMEOUT_MS = 10_000
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 65_536
@@ -159,9 +161,20 @@ interface ApiModel {
 export interface CommandCodeModel {
   id: string
   name: string
+  api: Api
   reasoning: boolean
   contextWindow: number
   maxTokens: number
+}
+
+export function apiForModelId(id: string): Api {
+  return id.startsWith("claude-") ? "anthropic-messages" : "openai-completions"
+}
+
+export function baseUrlForModel(apiBase: string, api: Api): string {
+  const normalized = apiBase.replace(/\/+$/g, "")
+  if (api !== "anthropic-messages") return normalized
+  return normalized.endsWith("/v1") ? normalized.slice(0, -3) : normalized
 }
 
 interface FetchCommandCodeModelsOptions {
@@ -225,6 +238,7 @@ function parseCachedModel(value: unknown): CommandCodeModel {
   return {
     id,
     name: stringField(value, "name"),
+    api: apiForModelId(id),
     reasoning: isReasoningModel(id),
     contextWindow: positiveNumberField(value, "contextWindow"),
     maxTokens: positiveNumberField(value, "maxTokens"),
@@ -329,6 +343,7 @@ export function commandCodeModelsFromApiResponse(value: unknown): readonly Comma
   return data.map(parseApiModel).map((model) => ({
     id: model.id,
     name: `${model.name} (CC)`,
+    api: apiForModelId(model.id),
     reasoning: isReasoningModel(model.id),
     contextWindow: model.contextLength,
     maxTokens: Math.min(model.contextLength, DEFAULT_MAX_OUTPUT_TOKENS),

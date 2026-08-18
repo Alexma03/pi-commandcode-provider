@@ -77,7 +77,7 @@ const server = createServer((req, res) => {
     return
   }
 
-  if (req.method !== "POST" || req.url !== "/alpha/generate") {
+  if (req.method !== "POST" || req.url !== "/provider/v1/chat/completions") {
     res.writeHead(404)
     res.end("Not found")
     return
@@ -103,14 +103,19 @@ const server = createServer((req, res) => {
     }
 
     res.writeHead(200, {
-      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Type": "text/event-stream; charset=utf-8",
       "Transfer-Encoding": "chunked",
     })
-    res.write(`${JSON.stringify({ type: "text-delta", text: "mock-omp-ok" })}\n`)
     res.write(
-      `${JSON.stringify({ type: "finish", finishReason: "stop", totalUsage: { inputTokens: 1, outputTokens: 1 } })}\n`,
+      `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: "mock-omp-ok" }, finish_reason: null }] })}\n\n`,
     )
-    res.end()
+    res.write(
+      `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`,
+    )
+    res.write(
+      `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", choices: [], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`,
+    )
+    res.end("data: [DONE]\n\n")
   })
 })
 
@@ -129,7 +134,7 @@ function runOmp(args, timeoutMs = 30_000) {
         USERPROFILE: tempHome,
         PI_CODING_AGENT_DIR: join(tempHome, ".omp", "agent"),
         COMMANDCODE_API_KEY: "mock-key",
-        COMMANDCODE_API_BASE: apiBase,
+        COMMANDCODE_API_BASE: `${apiBase}/provider/v1`,
         COMMANDCODE_MODELS_URL: `${apiBase}/provider/v1/models`,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -185,8 +190,8 @@ try {
     "Bearer mock-key",
     "should send the resolved env-var value, not the literal var name",
   )
-  assert.equal(lastRequestBody?.params?.model, TEST_MODEL)
-  assert.equal(typeof lastRequestBody?.params?.system, "string")
+  assert.equal(lastRequestBody?.model, TEST_MODEL)
+  assert.ok(Array.isArray(lastRequestBody?.messages))
 
   console.log("[omp-compat] PASS")
 } finally {

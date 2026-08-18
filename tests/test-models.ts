@@ -5,6 +5,8 @@ import { join } from "node:path"
 import { describe, it } from "node:test"
 
 import {
+  apiForModelId,
+  baseUrlForModel,
   commandCodeModelsFromApiResponse,
   commandCodeModelsFromCache,
   DEFAULT_MODELS_TIMEOUT_MS,
@@ -37,6 +39,7 @@ const EXPECTED_MODELS: readonly CommandCodeModel[] = [
   {
     id: "Qwen/Qwen3.7-Max",
     name: "Qwen 3.7 Max (CC)",
+    api: "openai-completions",
     reasoning: false,
     contextWindow: 1_000_000,
     maxTokens: 65_536,
@@ -82,6 +85,19 @@ async function withTemporaryCache(
 describe("commandCodeModelsFromApiResponse()", () => {
   it("converts the Provider API model list to pi models", () => {
     assert.deepEqual(commandCodeModelsFromApiResponse(API_RESPONSE), EXPECTED_MODELS)
+  })
+
+  it("routes Claude models to Anthropic Messages and all others to Chat Completions", () => {
+    assert.equal(apiForModelId("claude-sonnet-4-6"), "anthropic-messages")
+    assert.equal(apiForModelId("gpt-5.6-sol"), "openai-completions")
+    assert.equal(
+      baseUrlForModel("https://api.commandcode.ai/provider/v1/", "openai-completions"),
+      "https://api.commandcode.ai/provider/v1",
+    )
+    assert.equal(
+      baseUrlForModel("https://api.commandcode.ai/provider/v1/", "anthropic-messages"),
+      "https://api.commandcode.ai/provider",
+    )
   })
 
   it("matches command-code@1.15.1 image input capabilities", () => {

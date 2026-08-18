@@ -49,6 +49,7 @@ class CommandContext implements CommandCodeCommandContext {
 const FIRST_MODEL: CommandCodeModel = {
   id: "first-model",
   name: "First Model",
+  api: "openai-completions",
   reasoning: true,
   contextWindow: 128_000,
   maxTokens: 16_384,
@@ -57,6 +58,7 @@ const FIRST_MODEL: CommandCodeModel = {
 const SECOND_MODEL: CommandCodeModel = {
   id: "second-model",
   name: "Second Model",
+  api: "openai-completions",
   reasoning: true,
   contextWindow: 256_000,
   maxTokens: 32_768,
