@@ -127,6 +127,7 @@ export default async function (pi: ExtensionAPI) {
         timeoutMs: modelsTimeoutMs,
       }),
     createProviderConfig: (models) => createProviderConfig(models, apiBase, transport.stream),
+    getTransport: transport.getTransport,
   })
 
   await runtime.initialize()
