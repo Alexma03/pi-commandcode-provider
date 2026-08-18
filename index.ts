@@ -29,7 +29,7 @@ import { MODEL_COSTS, ZERO_MODEL_COST } from "./src/pricing.ts"
 import { createCommandCodeRuntime } from "./src/runtime.ts"
 
 function commandCodeHeaders(): Record<string, string> | undefined {
-  if (process.env.CMD_ZDR === "1" || process.env.COMMANDCODE_ZDR === "1") {
+  if (process.env.COMMANDCODE_ZDR === "1") {
     return { "x-cmd-zdr": "1" }
   }
   return undefined

@@ -129,7 +129,7 @@ While pi is running, use these provider commands without restarting:
 - `/commandcode-refresh` fetches and re-registers the current model catalog. Overlapping refreshes are coalesced, and a failed refresh keeps the last valid catalog active.
 - `/commandcode-status` shows redacted discovery diagnostics, including the source, model count, timestamps, cache path, endpoint, and warning.
 
-Set `CMD_ZDR=1` or `COMMANDCODE_ZDR=1` to send Command Code's documented `x-cmd-zdr: 1` zero-data-retention header.
+Set `COMMANDCODE_ZDR=1` to send Command Code's documented `x-cmd-zdr: 1` zero-data-retention header.
 
 The following environment variables are intended for tests, local mocks, and compatible API endpoints:
 
