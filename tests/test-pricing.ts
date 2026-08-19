@@ -108,10 +108,16 @@ describe("MODEL_COSTS pricing overlay", () => {
   })
 
   it("matches corrected official rates", () => {
+    assertCost("deepseek/deepseek-v4-pro", {
+      input: 0.66,
+      output: 1.98,
+      cacheRead: 0.022,
+      cacheWrite: 0,
+    })
     assertCost("deepseek/deepseek-v4-flash", {
-      input: 0.14,
-      output: 0.28,
-      cacheRead: 0.0028,
+      input: 0.22,
+      output: 0.66,
+      cacheRead: 0.007,
       cacheWrite: 0,
     })
     assertCost("Qwen/Qwen3.7-Max", {
@@ -163,7 +169,7 @@ describe("MODEL_COSTS pricing overlay", () => {
 
   it("tracks pricing provenance", () => {
     assert.equal(PRICING_SOURCE_URL, "https://commandcode.ai/docs/resources/pricing-limits")
-    assert.equal(PRICING_LAST_VERIFIED, "2026-08-18")
+    assert.equal(PRICING_LAST_VERIFIED, "2026-08-20")
   })
 
   it("fails once temporary pricing needs review", () => {

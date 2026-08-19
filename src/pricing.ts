@@ -20,7 +20,7 @@ export interface TemporaryPricing {
 }
 
 export const PRICING_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const PRICING_LAST_VERIFIED = "2026-08-18"
+export const PRICING_LAST_VERIFIED = "2026-08-20"
 
 export const ZERO_MODEL_COST: CommandCodeModelCost = {
   input: 0,
@@ -61,17 +61,18 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
   "MiniMaxAI/MiniMax-M3": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 },
   "MiniMaxAI/MiniMax-M2.7": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 },
   "MiniMaxAI/MiniMax-M2.5": { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0 },
-  // Permanent 75% discount.
+  // DeepSeek V4 uses time-dependent rates. Display the documented off-peak
+  // rates, which apply for 17 hours per day; the Usage page remains authoritative.
   "deepseek/deepseek-v4-pro": {
-    input: 0.435,
-    output: 0.87,
-    cacheRead: 0.003625,
+    input: 0.66,
+    output: 1.98,
+    cacheRead: 0.022,
     cacheWrite: 0,
   },
   "deepseek/deepseek-v4-flash": {
-    input: 0.14,
-    output: 0.28,
-    cacheRead: 0.0028,
+    input: 0.22,
+    output: 0.66,
+    cacheRead: 0.007,
     cacheWrite: 0,
   },
   "Qwen/Qwen3.8-Max": { input: 2, output: 6, cacheRead: 0.25, cacheWrite: 2.5 },
