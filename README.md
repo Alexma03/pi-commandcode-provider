@@ -147,9 +147,9 @@ For vision-capable models, Pi's native provider adapters forward image blocks fr
 
 ## Pricing display
 
-The Command Code Provider API does not currently include prices in its model catalog. This extension therefore keeps a static table for models with known prices so pi can display estimated request costs.
+The Command Code Provider API does not currently include prices in its model catalog. This extension therefore keeps a static table for models with known prices so pi can display estimated request costs. DeepSeek V4 uses time-dependent rates; pi displays the documented off-peak rate, which applies for 17 hours per day.
 
-Models missing from that table display zero cost in pi. This does **not** mean that Command Code will bill the request at zero. Check the current [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits) before relying on the displayed value.
+Models missing from that table display zero cost in pi. This does **not** mean that Command Code will bill the request at zero. The Command Code Usage page remains authoritative for each request. Check the current [Command Code pricing](https://commandcode.ai/docs/resources/pricing-limits) before relying on the displayed value.
 
 ## Update and remove
 

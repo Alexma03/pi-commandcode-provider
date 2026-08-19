@@ -3,11 +3,11 @@
 ## Unreleased
 
 - Prefer Command Code's Provider API (`/provider/v1/chat/completions` and `/provider/v1/messages`) and automatically fall back to the existing `/alpha/generate` transport only when the Provider API returns `403 upgrade_required` for a Go-plan account.
-- Remember the detected transport for the running process, re-detect it when credentials change, and never fall back for unrelated authentication, permission, rate-limit, network, or server failures.
-- Use Pi's native OpenAI- and Anthropic-compatible providers for Provider API streaming while preserving the existing hardened generate transport, dynamic model discovery, offline cache, refresh/status commands, pricing, and OAuth credentials.
+- Remember the detected transport for the running process, re-detect it when credentials change, prevent stale in-flight requests from overwriting the new credential's transport, and never fall back for unrelated authentication, permission, rate-limit, network, or server failures.
+- Use Pi's native OpenAI- and Anthropic-compatible providers for Provider API streaming, including adaptive thinking for current reasoning-capable Claude models, while preserving the existing hardened generate transport, dynamic model discovery, offline cache, refresh/status commands, pricing, and OAuth credentials.
 - Let `/login` use browser authentication, an explicit API-key prompt, or a directly pasted API key.
 - Add optional zero-data-retention headers through `COMMANDCODE_ZDR=1`.
-- Refresh GPT-5.6 Terra and Luna display prices after their temporary 50% promotion ended.
+- Refresh GPT-5.6 Terra and Luna display prices after their temporary 50% promotion ended, and display the current DeepSeek V4 off-peak rates for its time-dependent pricing.
 - Add isolated live E2E profiles for separate Go-plan and Provider-API credentials, including an explicit selected-transport assertion and packed-package validation.
 
 ## 0.5.1 - 2026-08-11
