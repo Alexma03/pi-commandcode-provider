@@ -25,6 +25,9 @@ import { fileURLToPath } from "node:url"
 const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const extensionPath = join(projectDir, "index.ts")
 const testModel = process.env.COMMANDCODE_E2E_MODEL ?? "deepseek/deepseek-v4-flash"
+const testProfile = process.env.COMMANDCODE_E2E_PROFILE
+const expectedTransport =
+  testProfile === "go" ? "generate" : testProfile === "provider" ? "provider" : undefined
 const marker = "commandcode-live-e2e-ok"
 
 function findPiBinary() {
@@ -57,9 +60,18 @@ if (!piBin || !hasAuthMetadata()) {
   process.exit(0)
 }
 
+const profileAgentDir = testProfile
+  ? mkdtempSync(join(tmpdir(), `pi-commandcode-live-${testProfile}-agent-`))
+  : undefined
+
 function safeEnv(overrides = {}) {
   const env = { ...process.env, PI_SKIP_VERSION_CHECK: "1", ...overrides }
-  delete env.COMMANDCODE_API_KEY
+  if (testProfile && profileAgentDir) {
+    env.PI_CODING_AGENT_DIR = profileAgentDir
+    env.COMMANDCODE_MODELS_CACHE = join(profileAgentDir, "commandcode-models.json")
+  } else {
+    delete env.COMMANDCODE_API_KEY
+  }
   return env
 }
 
@@ -228,12 +240,22 @@ try {
 
     return { firstThinkingDeltas, secondThinkingDeltas, stderr: getStderr() }
   })
-  assert.ok(multiTurn.firstThinkingDeltas > 0, "first turn should stream reasoning")
-  assert.ok(multiTurn.secondThinkingDeltas > 0, "follow-up turn should stream fresh reasoning")
+  if (testProfile !== "provider") {
+    assert.ok(multiTurn.firstThinkingDeltas > 0, "first turn should stream reasoning")
+    assert.ok(multiTurn.secondThinkingDeltas > 0, "follow-up turn should stream fresh reasoning")
+  }
   assert.doesNotMatch(multiTurn.stderr, /Bearer\s+\S+/i)
 
   console.log("[live-e2e] live runtime refresh/status commands")
   const runtime = await runRpc(extensionPath, async ({ send, waitFor, getStderr }) => {
+    if (expectedTransport) {
+      send({ id: "transport-probe", type: "prompt", message: `Reply exactly: ${marker}` })
+      await waitFor(
+        (event) => event.type === "response" && event.id === "transport-probe" && event.success,
+      )
+      await waitFor((event) => event.type === "agent_settled")
+    }
+
     send({ id: "commands", type: "get_commands" })
     const commands = await waitFor(
       (event) => event.type === "response" && event.id === "commands" && event.success,
@@ -264,6 +286,7 @@ try {
   assert.ok(runtime.names.includes("commandcode-refresh"))
   assert.ok(runtime.names.includes("commandcode-status"))
   assert.match(runtime.refresh, /model catalog (?:refreshed|unchanged)/)
+  if (expectedTransport) assert.match(runtime.status, new RegExp(`transport: ${expectedTransport}`))
   assert.match(runtime.status, /source: (?:live|cache)/)
   assert.match(runtime.status, /model count: [1-9][0-9]*/)
   assert.doesNotMatch(`${runtime.refresh}\n${runtime.status}\n${runtime.stderr}`, /Bearer\s+\S+/i)
@@ -296,30 +319,32 @@ try {
   assert.match(toolResult.stdout, new RegExp(marker))
   assert.equal(readFileSync(targetPath, "utf-8"), marker)
 
-  console.log("[live-e2e] image rejection through real RPC host")
-  const image = await runRpc(extensionPath, async ({ send, waitFor, events }) => {
-    send({
-      id: "image",
-      type: "prompt",
-      message: "Describe this image",
-      images: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }],
+  if (testProfile !== "provider") {
+    console.log("[live-e2e] image rejection through real RPC host")
+    const image = await runRpc(extensionPath, async ({ send, waitFor, events }) => {
+      send({
+        id: "image",
+        type: "prompt",
+        message: "Describe this image",
+        images: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }],
+      })
+      await waitFor((event) => event.type === "response" && event.id === "image")
+      await waitFor(
+        (event) =>
+          event.type === "message_end" &&
+          event.message?.role === "assistant" &&
+          event.message?.stopReason === "error",
+      )
+      return events
     })
-    await waitFor((event) => event.type === "response" && event.id === "image")
-    await waitFor(
-      (event) =>
-        event.type === "message_end" &&
-        event.message?.role === "assistant" &&
-        event.message?.stopReason === "error",
+    assert.ok(
+      image.some(
+        (event) =>
+          event.type === "message_end" &&
+          /does not support image content/i.test(event.message?.errorMessage ?? ""),
+      ),
     )
-    return events
-  })
-  assert.ok(
-    image.some(
-      (event) =>
-        event.type === "message_end" &&
-        /does not support image content/i.test(event.message?.errorMessage ?? ""),
-    ),
-  )
+  }
 
   console.log("[live-e2e] packed artifact with existing authentication")
   const packDir = join(tempRoot, "pack")
@@ -361,4 +386,5 @@ try {
   console.log("[live-e2e] PASS")
 } finally {
   rmSync(tempRoot, { recursive: true, force: true })
+  if (profileAgentDir) rmSync(profileAgentDir, { recursive: true, force: true })
 }

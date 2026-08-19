@@ -110,6 +110,7 @@ export interface StreamOptions {
   apiKey?: string
   signal?: AbortSignal
   headers?: Record<string, string>
+  fetch?: typeof fetch
   maxTokens?: number
   /** Resolved pi thinking level; forwarded only through the model's map. */
   reasoning?: string

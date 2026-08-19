@@ -186,7 +186,7 @@ describe("login()", () => {
         authUrl = params.url
       },
       onPrompt(_params: { message: string }): Promise<string> {
-        throw new Error("onPrompt should not be called in browser flow")
+        return Promise.resolve("")
       },
     }
 
@@ -239,7 +239,7 @@ describe("login()", () => {
     process.env.COMMANDCODE_AUTH_TIMEOUT_MS = "1"
 
     let authUrl = ""
-    let promptMessage = ""
+    const promptMessages: string[] = []
 
     try {
       const result = await login({
@@ -247,13 +247,13 @@ describe("login()", () => {
           authUrl = params.url
         },
         async onPrompt(params: { message: string }): Promise<string> {
-          promptMessage = params.message
-          return "\u001b[200~  user_manualApiKey\n\u001b[201~"
+          promptMessages.push(params.message)
+          return promptMessages.length === 1 ? "" : "\u001b[200~  user_manualApiKey\n\u001b[201~"
         },
       })
 
       assert.match(authUrl, /^https:\/\/commandcode\.ai\/studio\/auth\/cli\?/)
-      assert.match(promptMessage, /Paste your Command Code API key/)
+      assert.match(promptMessages[1] ?? "", /Paste your Command Code API key/)
       assert.equal(result.access, "user_manualApiKey")
       assert.equal(result.refresh, "user_manualApiKey")
       assert.ok(result.expires > Date.now(), "expiry should be far in the future")
@@ -263,6 +263,37 @@ describe("login()", () => {
     }
   })
 
+  it("accepts a directly pasted API key", async () => {
+    let authOpened = false
+    const result = await login({
+      onAuth() {
+        authOpened = true
+      },
+      onPrompt(): Promise<string> {
+        return Promise.resolve("user_directApiKey")
+      },
+    })
+
+    assert.equal(authOpened, false)
+    assert.equal(result.access, "user_directApiKey")
+  })
+
+  it("offers an explicit API key prompt", async () => {
+    let promptCount = 0
+    const result = await login({
+      onAuth() {
+        throw new Error("browser should not open")
+      },
+      onPrompt(): Promise<string> {
+        promptCount += 1
+        return Promise.resolve(promptCount === 1 ? "key" : "user_promptedApiKey")
+      },
+    })
+
+    assert.equal(result.access, "user_promptedApiKey")
+    assert.equal(promptCount, 2)
+  })
+
   it("rejects on state token mismatch", async () => {
     let authUrl = ""
     const callbacks = {
@@ -270,7 +301,7 @@ describe("login()", () => {
         authUrl = params.url
       },
       onPrompt(_params: { message: string }): Promise<string> {
-        throw new Error("should not prompt")
+        return Promise.resolve("")
       },
     }
 

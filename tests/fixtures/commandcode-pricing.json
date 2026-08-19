@@ -1,5 +1,5 @@
 {
-  "verifiedAt": "2026-08-04",
+  "verifiedAt": "2026-08-20",
   "source": "https://commandcode.ai/docs/resources/pricing-limits",
   "tierPolicy": "Use request-wide input tiers; the highest threshold exceeded by input plus cache tokens applies to the full request.",
   "tiers": {
@@ -7,9 +7,7 @@
     "Qwen/Qwen3.7-Flash": [
       [32000, 0.1, 0.4, 0.02, 0.125],
       [256000, 0.2, 0.8, 0.04, 0.25]
-    ],
-    "gpt-5.6-terra": [[272000, 2, 9, 0.2, 2.5]],
-    "gpt-5.6-luna": [[272000, 0.2, 0.9, 0.02, 0.25]]
+    ]
   },
   "costs": {
     "poolside/laguna-s-2.1-free": [0, 0, 0, 0],
@@ -27,8 +25,8 @@
     "MiniMaxAI/MiniMax-M3": [0.3, 1.2, 0.06, 0],
     "MiniMaxAI/MiniMax-M2.7": [0.3, 1.2, 0.06, 0],
     "MiniMaxAI/MiniMax-M2.5": [0.3, 1.2, 0.03, 0],
-    "deepseek/deepseek-v4-pro": [0.435, 0.87, 0.003625, 0],
-    "deepseek/deepseek-v4-flash": [0.14, 0.28, 0.0028, 0],
+    "deepseek/deepseek-v4-pro": [0.66, 1.98, 0.022, 0],
+    "deepseek/deepseek-v4-flash": [0.22, 0.66, 0.007, 0],
     "Qwen/Qwen3.8-Max": [2, 6, 0.25, 2.5],
     "Qwen/Qwen3.7-Max": [2.5, 7.5, 0.5, 3.13],
     "Qwen/Qwen3.7-Plus": [0.4, 1.6, 0.08, 0.5],
@@ -52,8 +50,8 @@
     "claude-opus-4-7": [5, 25, 0.5, 6.25],
     "claude-haiku-4-5-20251001": [1, 5, 0.1, 1.25],
     "gpt-5.6-sol": [5, 30, 0.5, 6.25],
-    "gpt-5.6-terra": [1, 6, 0.1, 1.25],
-    "gpt-5.6-luna": [0.1, 0.6, 0.01, 0.125],
+    "gpt-5.6-terra": [2, 12, 0.2, 2.5],
+    "gpt-5.6-luna": [0.2, 1.2, 0.02, 0.25],
     "gpt-5.5": [5, 30, 0.5, 0],
     "gpt-5.4": [2.5, 15, 0.25, 0],
     "gpt-5.3-codex": [2, 8, 0.5, 0],
