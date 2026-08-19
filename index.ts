@@ -85,6 +85,7 @@ function createProviderConfig(
               supportsLongCacheRetention: false,
               supportsCacheControlOnTools: false,
               supportsToolReferences: false,
+              ...(model.reasoning ? { forceAdaptiveThinking: true } : {}),
             },
     })),
   }

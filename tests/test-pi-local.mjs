@@ -731,6 +731,8 @@ try {
       "commandcode",
       "--model",
       CLAUDE_TEST_MODEL,
+      "--thinking",
+      "high",
     ],
     30_000,
   )
@@ -738,6 +740,8 @@ try {
   assert.match(claudePrint.stdout, /mock-pi-ok/)
   assert.equal(requestCount, 1)
   assert.equal(lastRequestBody?.model, CLAUDE_TEST_MODEL)
+  assert.equal(lastRequestBody?.thinking?.type, "adaptive")
+  assert.deepEqual(lastRequestBody?.output_config, { effort: "high" })
   assert.equal(lastRequestHeaders["x-api-key"], "mock-key")
   assert.equal(lastRequestHeaders["x-cmd-zdr"], "1")
 
