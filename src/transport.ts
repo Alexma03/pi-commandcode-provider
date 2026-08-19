@@ -71,6 +71,7 @@ export function createCommandCodeTransportRouter(deps: TransportDependencies) {
         apiKey = options?.apiKey
         transport = "unknown"
       }
+      const requestApiKey = options?.apiKey
       if (transport === "generate") return deps.streamGenerate(model, context, options)
 
       const output = deps.createStream()
@@ -94,13 +95,13 @@ export function createCommandCodeTransportRouter(deps: TransportDependencies) {
 
         for await (const event of providerStream) {
           if (!upgradeRequired) {
-            transport = "provider"
+            if (apiKey === requestApiKey) transport = "provider"
             output.push(event)
           }
         }
 
         if (upgradeRequired) {
-          transport = "generate"
+          if (apiKey === requestApiKey) transport = "generate"
           await pipe(deps.streamGenerate(model, context, options), output)
         }
         output.end()

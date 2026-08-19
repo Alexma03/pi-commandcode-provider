@@ -159,6 +159,70 @@ describe("Command Code transport router", () => {
     assert.equal(generateCalls, 1)
   })
 
+  it("does not let a stale request overwrite the transport for a new API key", async () => {
+    let releaseGoRequest: (() => void) | undefined
+    const goRequestGate = new Promise<void>((resolve) => {
+      releaseGoRequest = resolve
+    })
+    let providerCalls = 0
+    let generateCalls = 0
+    const upgradeBody = JSON.stringify({ error: { code: "upgrade_required" } })
+    const router = createCommandCodeTransportRouter({
+      createStream: createTestEventStream,
+      streamProvider: (_model, _context, options) => {
+        providerCalls += 1
+        const response =
+          options?.apiKey === "go-key"
+            ? new Response(upgradeBody, { status: 403 })
+            : new Response("ok", { status: 200 })
+        const stream = createTestEventStream()
+        const run = async () => {
+          if (options?.apiKey === "go-key") await goRequestGate
+          const received = await (options?.fetch ?? fetch)("https://provider.test", {})
+          await options?.onResponse?.(
+            { status: received.status, headers: {} },
+            makeModel({ api: "openai-completions" }),
+          )
+          if (response.ok) {
+            for await (const event of completedStream("provider")) stream.push(event)
+          }
+          stream.end()
+        }
+        run().catch(() => stream.end())
+        return stream
+      },
+      streamGenerate: () => {
+        generateCalls += 1
+        return completedStream("generate")
+      },
+    })
+
+    const staleGoRequest = collectEvents(
+      router.stream(makeModel(), makeContext(), {
+        apiKey: "go-key",
+        fetch: () => Promise.resolve(new Response(upgradeBody, { status: 403 })),
+      }),
+    )
+    await collectEvents(
+      router.stream(makeModel(), makeContext(), {
+        apiKey: "provider-key",
+        fetch: () => Promise.resolve(new Response("ok", { status: 200 })),
+      }),
+    )
+    releaseGoRequest?.()
+    await staleGoRequest
+    await collectEvents(
+      router.stream(makeModel(), makeContext(), {
+        apiKey: "provider-key",
+        fetch: () => Promise.resolve(new Response("ok", { status: 200 })),
+      }),
+    )
+
+    assert.equal(router.getTransport(), "provider")
+    assert.equal(providerCalls, 3)
+    assert.equal(generateCalls, 1)
+  })
+
   it("does not fall back for other 403 errors", async () => {
     let generateCalls = 0
     const responseBody = JSON.stringify({ error: { code: "permission_denied" } })
