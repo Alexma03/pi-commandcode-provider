@@ -16,6 +16,7 @@ import {
   mapFinishReason,
   messagesToCC,
   parseStreamEventLine,
+  pickCommandCodeApiKey,
   projectSlugFromPath,
   textContent,
   toJsonSchema,
@@ -103,6 +104,36 @@ describe("error redaction", () => {
       redactCommandCodeErrorText("provider returned sk-test-secret-value-1234567890"),
       /sk-test-secret-value/,
     )
+  })
+})
+
+describe("pickCommandCodeApiKey()", () => {
+  it("falls back to the host key for a placeholder registry value", () => {
+    assert.equal(pickCommandCodeApiKey("$COMMANDCODE_API_KEY", "file-key"), "file-key")
+    assert.equal(pickCommandCodeApiKey("COMMANDCODE_API_KEY", "file-key"), "file-key")
+  })
+
+  it("returns undefined when only a placeholder is provided (no fallback)", () => {
+    assert.equal(pickCommandCodeApiKey("$COMMANDCODE_API_KEY", undefined), undefined)
+  })
+
+  it("prefers a real registry key over the host fallback", () => {
+    assert.equal(pickCommandCodeApiKey("real-registry-key", "file-key"), "real-registry-key")
+  })
+
+  it("falls back to the host key when the registry has none", () => {
+    assert.equal(pickCommandCodeApiKey(undefined, "file-key"), "file-key")
+    assert.equal(pickCommandCodeApiKey(undefined, undefined), undefined)
+  })
+
+  it("falls back to the host key for empty or whitespace registry values", () => {
+    assert.equal(pickCommandCodeApiKey("", "file-key"), "file-key")
+    assert.equal(pickCommandCodeApiKey("   ", "file-key"), "file-key")
+    assert.equal(pickCommandCodeApiKey(" ", undefined), undefined)
+  })
+
+  it("trims a real registry key", () => {
+    assert.equal(pickCommandCodeApiKey("  real-registry-key  ", "file-key"), "real-registry-key")
   })
 })
 
@@ -359,7 +390,7 @@ describe("toJsonSchema()", () => {
     if (!outputProperties || typeof outputProperties !== "object") {
       throw new Error("expected object properties")
     }
-    assert.ok(Object.prototype.hasOwnProperty.call(outputProperties, "__proto__"))
+    assert.ok(Object.hasOwn(outputProperties, "__proto__"))
     assert.deepEqual(Object.getOwnPropertyDescriptor(outputProperties, "__proto__")?.value, {
       type: "string",
     })

@@ -18,6 +18,7 @@ import { join } from "node:path"
 import { getConfiguredApiKey } from "./src/api-key.ts"
 import { createStreamCommandCode } from "./src/core.ts"
 import { calculateCommandCodeCost } from "./src/cost.ts"
+import { pickCommandCodeApiKey } from "./src/converters.ts"
 import {
   baseUrlForModel,
   DEFAULT_MODELS_URL,
@@ -32,7 +33,18 @@ import { getApiKey as getOAuthApiKey, login, refreshToken } from "./src/oauth.ts
 import { normalizeCommandCodeMessage } from "./src/overflow.ts"
 import { MODEL_COSTS, ZERO_MODEL_COST } from "./src/pricing.ts"
 import { createCommandCodeRuntime } from "./src/runtime.ts"
+import { fetchCommandCodeQuota, formatQuota, redactValue } from "./src/quota.ts"
 import { createCommandCodeTransportRouter } from "./src/transport.ts"
+
+const COMMAND_CODE_PROVIDER_ID = "commandcode"
+
+async function resolveCommandCodeApiKey(ctx: ExtensionCommandContext): Promise<string | undefined> {
+  const registryKey = await ctx.modelRegistry?.getApiKeyForProvider?.(COMMAND_CODE_PROVIDER_ID)
+  // Mirror src/core.ts: OMP may surface an unresolved placeholder; fall back
+  // to the env/auth-file resolver so we never send a literal placeholder as a
+  // Bearer token (which caused a 401 on /alpha/whoami).
+  return pickCommandCodeApiKey(registryKey, getConfiguredApiKey())
+}
 
 function commandCodeHeaders(): Record<string, string> | undefined {
   if (process.env.COMMANDCODE_ZDR === "1") {
@@ -116,6 +128,43 @@ export default async function (pi: ExtensionAPI) {
     if (event.message.role !== "assistant") return
     const normalized = normalizeCommandCodeMessage(event.message, ctx.model?.provider)
     return normalized ? { message: normalized.message } : undefined
+  })
+
+  pi.registerCommand("commandcode-quota", {
+    description: "Show Command Code account usage and quota",
+    handler: async (_args, ctx) => {
+      await ctx.waitForIdle?.()
+
+      // Resolve the key in a host-agnostic way so the command also works on
+      // OMP (which passes an unresolved "$COMMANDCODE_API_KEY" placeholder
+      // through the registry): filter placeholders and fall back to the
+      // env/auth-file resolver, mirroring src/core.ts.
+      const apiKey = await resolveCommandCodeApiKey(ctx)
+      if (!apiKey) {
+        ctx.ui.notify(
+          "Command Code quota requires an API key. Run /login and select Command Code, or set the COMMANDCODE_API_KEY env var.",
+          "warning",
+        )
+        return
+      }
+
+      const result = await fetchCommandCodeQuota({
+        apiKey,
+        // Alpha endpoints live under the legacy base (no /provider/v1),
+        // same as the fallback generate transport.
+        baseUrl: legacyApiBase(apiBase),
+        // Respect the user's zero-data-retention preference on usage/account
+        // calls too, matching the provider stream path.
+        extraHeaders: commandCodeHeaders(),
+      })
+
+      if (!result.ok) {
+        ctx.ui.notify(redactValue(result.error.message), "error")
+        return
+      }
+
+      ctx.ui.notify(formatQuota(result.quota), "info")
+    },
   })
 
   const runtime = createCommandCodeRuntime<ProviderConfig, ExtensionCommandContext>(pi, {
