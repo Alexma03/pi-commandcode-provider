@@ -12,7 +12,7 @@ export type CommandCodeApi = "openai-completions" | "anthropic-messages"
 export type CommandCodeInputType = "text" | "image"
 
 /**
- * Model input modalities from the command-code@1.15.1 bundled catalog.
+ * Model input modalities from the command-code@1.32.1 bundled catalog.
  * Models omitted here remain text-only so newly discovered IDs never claim
  * image support without upstream evidence.
  */
@@ -74,7 +74,7 @@ type CommandCodeReasoningEffort = Exclude<PiThinkingLevel, "off">
  * Per-model reasoning efforts supported by Command Code's generate endpoint.
  *
  * The Provider API does not expose reasoning metadata. This is an exact
- * snapshot of `reasoningEfforts` from the command-code@1.15.1 model catalog
+ * snapshot of `reasoningEfforts` from the command-code@1.32.1 model catalog
  * (`packages/shared/src/model-catalog.ts`, also published in the generated
  * `dist/bundled/command-code-knowledge/reference/models.md`). Models omitted
  * here let Command Code choose their reasoning depth, matching the CLI.
@@ -103,6 +103,7 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasonin
   "sakana/fugu-ultra": ["high", "xhigh"],
   "xai/grok-4.5": ["low", "medium", "high"],
   "zai-org/GLM-5.2": ["high", "max"],
+  "zai-org/GLM-5.3": ["low", "high", "max"],
 }
 
 const PI_THINKING_LEVELS: readonly PiThinkingLevel[] = [

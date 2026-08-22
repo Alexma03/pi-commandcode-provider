@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-08-04T10:12:57.953Z",
+  "fetchedAt": "2026-08-22T21:19:37.782Z",
   "source": "https://api.commandcode.ai/provider/v1/models",
   "modelIds": [
     "claude-sonnet-5",
@@ -23,6 +23,7 @@
     "moonshotai/Kimi-K2.7-Code-Highspeed",
     "moonshotai/Kimi-K2.6",
     "moonshotai/Kimi-K2.5",
+    "zai-org/GLM-5.3",
     "zai-org/GLM-5.2",
     "zai-org/GLM-5.2-Fast",
     "zai-org/GLM-5.1",
