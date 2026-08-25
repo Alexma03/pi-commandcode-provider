@@ -138,6 +138,29 @@ export function getApiKey(
   return undefined
 }
 
+// Hosts such as OMP may pass the literal env-var name "$COMMANDCODE_API_KEY"
+// (or "COMMANDCODE_API_KEY") as the "resolved" registry key instead of the
+// actual credential. Treat those as unresolved.
+export const COMMAND_CODE_PLACEHOLDER_KEYS = new Set([
+  "$COMMANDCODE_API_KEY",
+  "COMMANDCODE_API_KEY",
+])
+
+/**
+ * Pick the real API key from a host registry value and/or the env/auth-file
+ * fallback, never returning a literal placeholder or an empty/whitespace value.
+ * Pure/testable.
+ */
+export function pickCommandCodeApiKey(
+  registryKey: string | undefined,
+  hostKey: string | undefined,
+): string | undefined {
+  const trimmed = typeof registryKey === "string" ? registryKey.trim() : undefined
+  if (!trimmed) return hostKey
+  if (COMMAND_CODE_PLACEHOLDER_KEYS.has(trimmed)) return hostKey
+  return trimmed
+}
+
 export function textContent(message: { content?: unknown }): string {
   return recordArray(message.content)
     .filter((part) => part.type === "text")

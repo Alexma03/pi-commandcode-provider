@@ -165,7 +165,13 @@ function runOmp(args, timeoutMs = 30_000) {
 try {
   console.log("[omp-compat] list models through real extension")
   modelListRequestCount = 0
-  const result = await runOmp(["-e", EXT_PATH, "--list-models"])
+  // Prefer the flag form `omp -e EXT --list-models`; Homebrew's `omp`
+  // distribution only exposes the `omp models` subcommand, so fall back to
+  // that form when the flag invocation is not recognized.
+  let result = await runOmp(["-e", EXT_PATH, "--list-models"])
+  if (result.code !== 0) {
+    result = await runOmp(["models", "-e", EXT_PATH])
+  }
   assert.equal(result.code, 0, result.stderr)
   const listOutput = result.stdout || result.stderr
   assert.match(listOutput, /commandcode/)
