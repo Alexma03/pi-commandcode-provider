@@ -50,7 +50,7 @@ function assertCost(
 describe("MODEL_COSTS pricing overlay", () => {
   it("covers the current Command Code model catalog snapshot", () => {
     assert.equal(fixture.source, "https://api.commandcode.ai/provider/v1/models")
-    assert.match(fixture.fetchedAt, /^2026-08-04T/)
+    assert.match(fixture.fetchedAt, /^2026-08-22T/)
 
     const catalogIds = [...fixture.modelIds].sort()
     const pricedIds = Object.keys(MODEL_COSTS).sort()
@@ -169,7 +169,7 @@ describe("MODEL_COSTS pricing overlay", () => {
 
   it("tracks pricing provenance", () => {
     assert.equal(PRICING_SOURCE_URL, "https://commandcode.ai/docs/resources/pricing-limits")
-    assert.equal(PRICING_LAST_VERIFIED, "2026-08-20")
+    assert.equal(PRICING_LAST_VERIFIED, "2026-08-22")
   })
 
   it("fails once temporary pricing needs review", () => {

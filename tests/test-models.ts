@@ -100,7 +100,7 @@ describe("commandCodeModelsFromApiResponse()", () => {
     )
   })
 
-  it("matches command-code@1.15.1 image input capabilities", () => {
+  it("matches command-code@1.32.1 image input capabilities", () => {
     assert.deepEqual(inputModalitiesForModel("gpt-5.6-luna"), ["text", "image"])
     assert.deepEqual(inputModalitiesForModel("meta/muse-spark-1.2"), ["text", "image"])
     assert.deepEqual(inputModalitiesForModel("deepseek/deepseek-v4-pro"), ["text"])
@@ -123,7 +123,7 @@ describe("commandCodeModelsFromApiResponse()", () => {
     assert.equal(models[1]?.reasoning, false)
   })
 
-  it("matches the exact command-code@1.15.1 reasoning effort catalog", () => {
+  it("matches the exact command-code@1.32.1 reasoning effort catalog", () => {
     assert.deepEqual(MODEL_EFFORTS, {
       "Qwen/Qwen3.8-Max": ["low", "medium", "xhigh"],
       "claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
@@ -147,6 +147,7 @@ describe("commandCodeModelsFromApiResponse()", () => {
       "google/gemini-3.6-flash": ["low", "medium", "high"],
       "sakana/fugu-ultra": ["high", "xhigh"],
       "xai/grok-4.5": ["low", "medium", "high"],
+      "zai-org/GLM-5.3": ["low", "high", "max"],
       "zai-org/GLM-5.2": ["high", "max"],
     })
   })

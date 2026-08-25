@@ -43,7 +43,7 @@ export * from "./overflow.ts"
 export * from "./types.ts"
 
 export const DEFAULT_API_BASE = "https://api.commandcode.ai"
-export const COMMAND_CODE_CLI_VERSION = "1.15.1"
+export const COMMAND_CODE_CLI_VERSION = "1.32.1"
 
 const DEFAULT_GENERATE_MAX_TOKENS = 64_000
 const DEFAULT_MAX_RETRIES = 0

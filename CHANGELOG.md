@@ -2,10 +2,8 @@
 
 ## Unreleased
 
-- Reformat `/commandcode-quota` output into a dashboard layout: credits remaining/used with a percentage, monthly/purchased/free sources, plan, month-to-date cost/requests/tokens, and API key name, while keeping the 5-hour/weekly usage windows and full-detail link.
-- Optionally show an aggregate token count and API key name when the usage endpoints report them.
-- Fix `/commandcode-quota` on Oh My Pi: OMP surfaces an unresolved `$COMMANDCODE_API_KEY` placeholder through the model registry, which previously caused a 401 on the quota endpoints. The command now filters placeholders and falls back to the env/auth-file key resolver, matching the stream path.
-- Fix `/commandcode-quota` usage windows so the 5-hour and weekly limits actually render: the API reports `windowLimits` as a top-level sibling of `credits` (not nested inside it), and its `resetAt` is in milliseconds, not seconds. Both are now parsed correctly, giving real "resets in …" countdowns instead of omitting the section or showing a huge day count.
+- Add `/commandcode-quota` with live credits, plan, usage totals, and rolling-limit diagnostics from Command Code's alpha usage endpoints.
+- Add `zai-org/GLM-5.3` with its verified reasoning efforts and display pricing.
 - Prefer Command Code's Provider API (`/provider/v1/chat/completions` and `/provider/v1/messages`) and automatically fall back to the existing `/alpha/generate` transport only when the Provider API returns `403 upgrade_required` for a Go-plan account.
 - Remember the detected transport for the running process, re-detect it when credentials change, prevent stale in-flight requests from overwriting the new credential's transport, and never fall back for unrelated authentication, permission, rate-limit, network, or server failures.
 - Use Pi's native OpenAI- and Anthropic-compatible providers for Provider API streaming, including adaptive thinking for current reasoning-capable Claude models, while preserving the existing hardened generate transport, dynamic model discovery, offline cache, refresh/status commands, pricing, and OAuth credentials.
@@ -13,6 +11,7 @@
 - Add optional zero-data-retention headers through `COMMANDCODE_ZDR=1`.
 - Refresh GPT-5.6 Terra and Luna display prices after their temporary 50% promotion ended, and display the current DeepSeek V4 off-peak rates for its time-dependent pricing.
 - Add isolated live E2E profiles for separate Go-plan and Provider-API credentials, including an explicit selected-transport assertion and packed-package validation.
+- Fix extension load failure on newer pi hosts that reject registering a custom API under a built-in name (`openai-completions`); register under `commandcode-custom` instead and restore the real wire API before native compat dispatch.
 
 ## 0.5.1 - 2026-08-11
 

@@ -144,7 +144,7 @@ The following environment variables are intended for tests, local mocks, and com
 
 ## Image input
 
-The provider advertises image input only for models marked with the `image` input modality in the official Command Code CLI model catalog. The capability snapshot currently follows `command-code@1.15.1`; unknown models default to text-only until their upstream metadata is reviewed.
+The provider advertises image input only for models marked with the `image` input modality in the official Command Code CLI model catalog. The capability snapshot currently follows `command-code@1.32.1`; unknown models default to text-only until their upstream metadata is reviewed.
 
 For vision-capable models, Pi's native provider adapters forward image blocks from user messages and tool results using the documented OpenAI or Anthropic message schema. Unknown and text-only models remain marked text-only in Pi.
 
