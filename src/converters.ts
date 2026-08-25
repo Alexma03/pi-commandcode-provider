@@ -66,9 +66,8 @@ function imageContentError(role: string): Error {
 
 export function assertTextOnlyMessages(messages?: readonly MessageLike[]): void {
   for (const message of messages ?? []) {
-    if (imageParts(message.content).length > 0) {
-      const role = message.role === "toolResult" ? "tool results" : `${message.role} messages`
-      throw imageContentError(role)
+    if (message.role !== "toolResult" && imageParts(message.content).length > 0) {
+      throw imageContentError(`${message.role} messages`)
     }
   }
 }
@@ -268,6 +267,11 @@ export function messagesToCC(
       if (missingResults.length > 0) out.push({ role: "tool", content: missingResults })
     } else if (message.role === "toolResult") {
       if (!message.toolCallId || !callIds.has(message.toolCallId)) continue
+      const images = imageParts(message.content)
+      const text = textContent(message)
+      const outputText =
+        text ||
+        (images.length > 0 && !allowImages ? "[Image omitted: model does not support images]" : "")
       out.push({
         role: "tool",
         content: [
@@ -276,15 +280,13 @@ export function messagesToCC(
             toolCallId: message.toolCallId,
             toolName: message.toolName,
             output: message.isError
-              ? { type: "error-text", value: textContent(message) }
-              : { type: "text", value: textContent(message) },
+              ? { type: "error-text", value: outputText }
+              : { type: "text", value: outputText },
           },
         ],
       })
 
-      const images = imageParts(message.content)
-      if (images.length > 0) {
-        if (!allowImages) throw imageContentError("tool results")
+      if (images.length > 0 && allowImages) {
         out.push({
           role: "user",
           content: images.map(imageToCommandCode),
