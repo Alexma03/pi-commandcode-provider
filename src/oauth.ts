@@ -18,7 +18,8 @@ import { startAuthServer } from "./auth-server.ts"
 
 const STUDIO_BASE_URL = "https://commandcode.ai"
 const TEN_YEARS_MS = 10 * 365 * 24 * 60 * 60 * 1000 // API keys don't expire
-const DEFAULT_AUTH_TIMEOUT_MS = 15_000
+const DEFAULT_AUTH_TIMEOUT_MS = 120_000
+const DEFAULT_API_BASE = "https://api.commandcode.ai"
 
 export interface OAuthLoginCallbacks {
   onAuth(params: { url: string }): void
@@ -95,9 +96,34 @@ export function sanitizeApiKey(input: string): string {
     .trim()
 }
 
+export async function validateApiKey(
+  apiKey: string,
+  options: { fetchImpl?: typeof fetch; apiBase?: string } = {},
+): Promise<void> {
+  let response: Response
+  try {
+    response = await (options.fetchImpl ?? fetch)(
+      `${options.apiBase ?? DEFAULT_API_BASE}/alpha/whoami`,
+      {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      },
+    )
+  } catch (error) {
+    throw new Error(
+      `Could not validate the Command Code API key: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+
+  if (response.status === 401) throw new Error("Invalid Command Code API key")
+  if (!response.ok) {
+    throw new Error(`Could not validate the Command Code API key (${response.status})`)
+  }
+}
+
 async function promptForApiKey(callbacks: OAuthLoginCallbacks, message: string) {
   const apiKey = sanitizeApiKey(await callbacks.onPrompt({ message }))
   if (!apiKey) throw new Error("No Command Code API key provided")
+  await validateApiKey(apiKey)
   return credentialsFromApiKey(apiKey)
 }
 
@@ -130,9 +156,10 @@ async function chooseLoginFlow(callbacks: OAuthLoginCallbacks): Promise<LoginCho
 }
 
 async function browserLogin(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
+  const stateToken = generateStateToken()
   let authServer
   try {
-    authServer = await startAuthServer()
+    authServer = await startAuthServer({ expectedState: stateToken })
   } catch {
     return promptForApiKey(
       callbacks,
@@ -140,7 +167,6 @@ async function browserLogin(callbacks: OAuthLoginCallbacks): Promise<OAuthCreden
     )
   }
 
-  const stateToken = generateStateToken()
   const callbackUrl = `http://localhost:${authServer.port}/callback`
   const authUrl = `${STUDIO_BASE_URL}/studio/auth/cli?callback=${encodeURIComponent(callbackUrl)}&state=${encodeURIComponent(stateToken)}`
 
@@ -164,12 +190,6 @@ async function browserLogin(callbacks: OAuthLoginCallbacks): Promise<OAuthCreden
     throw error
   }
 
-  // Validate state token to prevent CSRF.
-  if (callback.state !== stateToken) {
-    authServer.server.close()
-    throw new Error("State token mismatch. Authentication may have been tampered with.")
-  }
-
   return credentialsFromApiKey(callback.apiKey)
 }
 
@@ -182,7 +202,10 @@ async function browserLogin(callbacks: OAuthLoginCallbacks): Promise<OAuthCreden
 export async function login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
   const choice = await chooseLoginFlow(callbacks)
 
-  if (choice.type === "apiKey") return credentialsFromApiKey(choice.apiKey)
+  if (choice.type === "apiKey") {
+    await validateApiKey(choice.apiKey)
+    return credentialsFromApiKey(choice.apiKey)
+  }
   if (choice.type === "prompt") {
     return promptForApiKey(callbacks, "Paste your Command Code API key:")
   }
