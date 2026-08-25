@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -301,9 +301,6 @@ async function main(): Promise<void> {
   )
 
   console.log(report)
-
-  const summaryPath = process.env.GITHUB_STEP_SUMMARY
-  if (summaryPath) await appendFile(summaryPath, report, "utf-8")
 
   if (hasModelMetadataDiff(diff)) {
     throw new Error(

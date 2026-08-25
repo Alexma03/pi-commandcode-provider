@@ -1,6 +1,14 @@
 name: Command Code model metadata
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/scripts/check-commandcode-model-metadata.ts"
+      - ".github/workflows/model-metadata.yml"
+      - "src/core.ts"
+      - "src/models.ts"
+      - "tests/test-model-metadata-check.ts"
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
@@ -25,4 +33,7 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci
       - name: Compare static metadata with the latest Command Code CLI
-        run: npm run check:model-metadata
+        run: npm run check:model-metadata | tee model-metadata-report.md
+      - name: Publish metadata report
+        if: always()
+        run: cat model-metadata-report.md >> "$GITHUB_STEP_SUMMARY"
