@@ -161,7 +161,7 @@ describe("projectSlugFromPath()", () => {
 })
 
 describe("text-only image handling", () => {
-  it("rejects image content for models without image support", () => {
+  it("rejects direct image input for models without image support", () => {
     assert.throws(
       () =>
         assertTextOnlyMessages([
@@ -172,16 +172,17 @@ describe("text-only image handling", () => {
         ]),
       /does not support image content/i,
     )
-    assert.throws(
-      () =>
-        assertTextOnlyMessages([
-          {
-            role: "toolResult",
-            toolCallId: "c1",
-            content: [{ type: "image", data: "base64-data", mimeType: "image/png" }],
-          },
-        ]),
-      /does not support image content/i,
+  })
+
+  it("allows historical tool-result images to be omitted for text-only models", () => {
+    assert.doesNotThrow(() =>
+      assertTextOnlyMessages([
+        {
+          role: "toolResult",
+          toolCallId: "c1",
+          content: [{ type: "image", data: "base64-data", mimeType: "image/png" }],
+        },
+      ]),
     )
   })
 })
@@ -594,6 +595,48 @@ describe("messagesToCC()", () => {
           ],
         },
       ],
+    )
+  })
+
+  it("omits tool-result images for text-only models while preserving their text", () => {
+    const result = messagesToCC([
+      { role: "user", content: "read image" },
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "c1", name: "read", arguments: {} }],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "c1",
+        toolName: "read",
+        content: [
+          { type: "text", text: "image attached" },
+          { type: "image", data: "aGVsbG8=", mimeType: "image/jpeg" },
+        ],
+      },
+    ])
+
+    assert.equal(objectAt(result, ["2", "content", "0", "output", "value"]), "image attached")
+    assert.equal(objectAt(result, ["3"]), undefined)
+  })
+
+  it("describes an omitted image-only tool result for text-only models", () => {
+    const result = messagesToCC([
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "c1", name: "read", arguments: {} }],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "c1",
+        toolName: "read",
+        content: [{ type: "image", data: "aGVsbG8=", mimeType: "image/jpeg" }],
+      },
+    ])
+
+    assert.equal(
+      objectAt(result, ["1", "content", "0", "output", "value"]),
+      "[Image omitted: model does not support images]",
     )
   })
 

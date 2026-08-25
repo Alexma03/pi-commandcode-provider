@@ -240,12 +240,16 @@ describe("streamCommandCode — successful streams", () => {
     )
   })
 
-  it("rejects a tool-result image before network access for text-only models", async () => {
+  it("omits a historical tool-result image after switching to a text-only model", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [JSON.stringify({ type: "finish", finishReason: "stop" })],
+    })
     const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
 
     const events = await collectEvents(
       streamCommandCode(
-        makeModel({ id: "deepseek/deepseek-v4-pro" }),
+        makeModel({ id: "deepseek/deepseek-v4-flash" }),
         makeContext({
           messages: [
             { role: "user", content: "read the image" },
@@ -257,19 +261,29 @@ describe("streamCommandCode — successful streams", () => {
               role: "toolResult",
               toolCallId: "c1",
               toolName: "read",
-              content: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }],
+              content: [
+                { type: "text", text: "image attached" },
+                { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+              ],
             },
+            { role: "user", content: "continue without the image" },
           ],
         }),
         { apiKey: "mock-key" },
       ),
     )
 
-    const lastEvent = events.at(-1)
-    assert.equal(lastEvent?.type, "error")
-    if (lastEvent?.type !== "error") throw new Error("expected error event")
-    assert.match(lastEvent.error.errorMessage ?? "", /does not support image content/i)
-    assert.equal(server.requestCount(), 0)
+    assert.equal(events.at(-1)?.type, "done")
+    assert.equal(server.requestCount(), 1)
+    const body = server.lastRequestBody()
+    assert.equal(
+      objectAt(body, ["params", "messages", "2", "content", "0", "output", "value"]),
+      "image attached",
+    )
+    assert.equal(
+      objectAt(body, ["params", "messages", "3", "content"]),
+      "continue without the image",
+    )
   })
 
   it("rejects images before network access for text-only models", async () => {
