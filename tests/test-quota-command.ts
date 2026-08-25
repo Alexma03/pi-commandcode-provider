@@ -68,7 +68,7 @@ describe("commandcode-quota command", () => {
     })
 
     assert.ok(pi.handler)
-    const ctx = context("$COMMANDCODE_API_KEY")
+    const ctx = context("$COMMAND_CODE_API_KEY")
     await pi.handler("", ctx.value)
     assert.equal(ctx.waited(), true)
     assert.equal(requestKey, "fallback-key")

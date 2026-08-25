@@ -79,7 +79,8 @@ jobs:
             This updates only machine-readable compatibility metadata:
             - CLI version used in the `x-command-code-version` header
             - image-input capabilities
-            - supported reasoning efforts
+            - reasoning capability and selectable effort levels
+            - model-specific maximum output limits
             - documented catalog snapshot version
 
             Pricing remains review-only because CLI documentation does not represent every pricing tier and temporary promotion used by the provider.

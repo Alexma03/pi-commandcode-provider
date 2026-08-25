@@ -77,6 +77,23 @@ describe("streamCommandCode — auth", () => {
     )
   })
 
+  it("accepts the official CLI API key environment variable", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [JSON.stringify({ type: "finish", finishReason: "stop" })],
+    })
+    const { streamCommandCode } = createTestDeps({
+      apiBase: server.baseUrl(),
+      env: { COMMAND_CODE_API_KEY: "official-env-key" },
+    })
+
+    await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), { apiKey: "$COMMAND_CODE_API_KEY" }),
+    )
+
+    assert.equal(server.lastRequestHeaders().authorization, "Bearer official-env-key")
+  })
+
   it("uses options.apiKey in the Authorization header", async () => {
     server.mockResponse({
       type: "success",
@@ -653,7 +670,7 @@ describe("streamCommandCode — request serialization", () => {
     assert.equal(objectAt(body, ["params", "stream"]), true)
     assert.equal(objectAt(body, ["params", "max_tokens"]), 500)
     assert.equal(objectAt(body, ["params", "reasoning_effort"]), undefined)
-    assert.equal(objectAt(body, ["params", "temperature"]), 0.3)
+    assert.equal(objectAt(body, ["params", "temperature"]), undefined)
     assert.equal(objectAt(body, ["params", "system"]), "You are a test assistant.")
     assert.equal(objectAt(body, ["memory"]), null)
     assert.equal(objectAt(body, ["taste"]), null)
@@ -671,8 +688,51 @@ describe("streamCommandCode — request serialization", () => {
     assert.equal(headers["x-command-code-version"], COMMAND_CODE_CLI_VERSION)
     assert.equal(headers["x-project-slug"], "repo")
     assert.equal(headers["x-taste-learning"], "true")
-    assert.equal(headers["x-co-flag"], "false")
+    assert.equal(headers["user-agent"], "cli")
+    assert.equal(headers["x-co-flag"], undefined)
     assert.equal(headers["x-session-id"], undefined)
+  })
+
+  it("forwards explicit temperature and stable session metadata", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [JSON.stringify({ type: "finish", finishReason: "stop" })],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), {
+        apiKey: "mock-key",
+        temperature: 0.7,
+        sessionId: "11111111-1111-4111-8111-111111111111",
+      }),
+    )
+
+    const body = server.lastRequestBody()
+    assert.equal(objectAt(body, ["params", "temperature"]), 0.7)
+    assert.equal(objectAt(body, ["threadId"]), "11111111-1111-4111-8111-111111111111")
+    assert.equal(
+      server.lastRequestHeaders()["x-session-id"],
+      "11111111-1111-4111-8111-111111111111",
+    )
+  })
+
+  it("omits non-UUID session ids from the generate thread id", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [JSON.stringify({ type: "finish", finishReason: "stop" })],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), {
+        apiKey: "mock-key",
+        sessionId: "human-readable-session",
+      }),
+    )
+
+    assert.equal(objectAt(server.lastRequestBody(), ["threadId"]), undefined)
+    assert.equal(server.lastRequestHeaders()["x-session-id"], "human-readable-session")
   })
 
   it("accepts the legacy OMP nested reasoning map", async () => {
@@ -915,6 +975,63 @@ describe("streamCommandCode — upstream errors and malformed streams", () => {
     assert.equal(error?.type, "error")
     if (error?.type !== "error") throw new Error("expected error")
     assert.equal(error.error.errorMessage, "provider failed")
+  })
+
+  it("rejects a truncated stream without a finish event", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [JSON.stringify({ type: "text-delta", text: "truncated" })],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), { apiKey: "mock-key" }),
+    )
+
+    const error = events.at(-1)
+    assert.equal(error?.type, "error")
+    if (error?.type !== "error") throw new Error("expected error")
+    assert.match(error.error.errorMessage ?? "", /no finish event/i)
+  })
+
+  it("maps an upstream abort event to an aborted request", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [JSON.stringify({ type: "abort" })],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), { apiKey: "mock-key" }),
+    )
+
+    const error = events.at(-1)
+    assert.equal(error?.type, "error")
+    if (error?.type !== "error") throw new Error("expected error")
+    assert.equal(error.reason, "aborted")
+  })
+
+  it("rejects terminal upstream network failure reasons", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [
+        JSON.stringify({
+          type: "finish",
+          finishReason: "stop",
+          rawFinishReason: "upstream_error",
+        }),
+      ],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), { apiKey: "mock-key" }),
+    )
+
+    const error = events.at(-1)
+    assert.equal(error?.type, "error")
+    if (error?.type !== "error") throw new Error("expected error")
+    assert.match(error.error.errorMessage ?? "", /upstream connection failed/i)
   })
 
   it("handles SSE lines, malformed lines, split chunks, and final line without newline", async () => {

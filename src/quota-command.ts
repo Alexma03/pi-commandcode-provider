@@ -45,7 +45,7 @@ export function registerCommandCodeQuota(
       const apiKey = pickCommandCodeApiKey(registryKey, getConfiguredKey())
       if (!apiKey) {
         ctx.ui.notify(
-          "Command Code quota requires an API key. Run /login and select Command Code, or set COMMANDCODE_API_KEY.",
+          "Command Code quota requires an API key. Run /login and select Command Code, or set COMMAND_CODE_API_KEY.",
           "warning",
         )
         return

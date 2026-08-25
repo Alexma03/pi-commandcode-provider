@@ -11,14 +11,19 @@ const profiles = process.argv.slice(2)
 
 if (
   profiles.length === 0 ||
-  profiles.some((profile) => profile !== "go" && profile !== "provider")
+  profiles.some((profile) => profile !== "go" && profile !== "goat" && profile !== "provider")
 ) {
-  console.error("Usage: node scripts/live-e2e-profile.mjs <go|provider> [go|provider]")
+  console.error("Usage: node scripts/live-e2e-profile.mjs <go|goat|provider> [go|goat|provider]")
   process.exit(2)
 }
 
 async function credentialFor(profile) {
-  const prefix = profile === "go" ? "COMMANDCODE_E2E_GO" : "COMMANDCODE_E2E_PROVIDER"
+  const prefix =
+    profile === "go"
+      ? "COMMANDCODE_E2E_GO"
+      : profile === "goat"
+        ? "COMMANDCODE_E2E_GOAT"
+        : "COMMANDCODE_E2E_PROVIDER"
   const direct = process.env[`${prefix}_API_KEY`]?.trim()
   const file = process.env[`${prefix}_API_KEY_FILE`]
 
@@ -35,15 +40,23 @@ async function credentialFor(profile) {
 
 function runProfile(profile, apiKey) {
   const modelVariable =
-    profile === "go" ? "COMMANDCODE_E2E_GO_MODEL" : "COMMANDCODE_E2E_PROVIDER_MODEL"
-  const model = process.env[modelVariable] ?? "deepseek/deepseek-v4-flash"
+    profile === "go"
+      ? "COMMANDCODE_E2E_GO_MODEL"
+      : profile === "goat"
+        ? "COMMANDCODE_E2E_GOAT_MODEL"
+        : "COMMANDCODE_E2E_PROVIDER_MODEL"
+  const model =
+    process.env[modelVariable] ??
+    (profile === "goat" ? "xai/grok-4.6" : "deepseek/deepseek-v4-flash")
   const env = {
     ...process.env,
-    COMMANDCODE_API_KEY: apiKey,
+    COMMAND_CODE_API_KEY: apiKey,
     COMMANDCODE_E2E_MODEL: model,
     COMMANDCODE_E2E_PROFILE: profile,
   }
+  delete env.COMMANDCODE_API_KEY
   delete env.COMMANDCODE_E2E_GO_API_KEY
+  delete env.COMMANDCODE_E2E_GOAT_API_KEY
   delete env.COMMANDCODE_E2E_PROVIDER_API_KEY
 
   return new Promise((resolveRun, reject) => {

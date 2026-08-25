@@ -148,6 +148,10 @@ function mappedReasoningEffort(model: ModelLike, options?: StreamOptions): strin
   return typeof mapped === "string" && mapped !== "off" ? mapped : undefined
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
 export function projectSlugFromPath(pathName: string): string {
   const slug = pathName
     .toLowerCase()
@@ -232,17 +236,15 @@ export function createStreamCommandCode(deps: CoreDependencies) {
     const stream = deps.createStream()
 
     async function run() {
-      // OMP may pass the legacy env-var name "COMMANDCODE_API_KEY" (old pi)
-      // or "$COMMANDCODE_API_KEY" (new pi) as the apiKey value instead of
-      // resolving it. Filter out these specific strings.
-      const LEGACY_API_KEY_REF = "$COMMANDCODE_API_KEY"
-      const OLD_API_KEY_REF = "COMMANDCODE_API_KEY"
+      // Some hosts pass a literal env-var reference instead of resolving it.
+      const PLACEHOLDER_API_KEYS = new Set([
+        "$COMMAND_CODE_API_KEY",
+        "COMMAND_CODE_API_KEY",
+        "$COMMANDCODE_API_KEY",
+        "COMMANDCODE_API_KEY",
+      ])
       const hostKey =
-        options?.apiKey &&
-        options.apiKey !== LEGACY_API_KEY_REF &&
-        options.apiKey !== OLD_API_KEY_REF
-          ? options.apiKey
-          : undefined
+        options?.apiKey && !PLACEHOLDER_API_KEYS.has(options.apiKey) ? options.apiKey : undefined
 
       const apiKey =
         hostKey ??
@@ -262,7 +264,7 @@ export function createStreamCommandCode(deps: CoreDependencies) {
           usage: defaultUsage(),
           stopReason: "error",
           errorMessage:
-            "No Command Code API key. Run /login and select Command Code, set the COMMANDCODE_API_KEY env var, or configure ~/.commandcode/auth.json, ~/.pi/agent/auth.json or ~/.omp/agent/auth.json",
+            "No Command Code API key. Run /login and select Command Code, set COMMAND_CODE_API_KEY (or legacy COMMANDCODE_API_KEY), or configure ~/.commandcode/auth.json, ~/.pi/agent/auth.json or ~/.omp/agent/auth.json",
           timestamp: now(),
         }
         stream.push({ type: "error", reason: "error", error: msg })
@@ -484,6 +486,15 @@ export function createStreamCommandCode(deps: CoreDependencies) {
           }
 
           case "finish": {
+            const rawFinishReason = stringValue(event.rawFinishReason)
+            if (
+              rawFinishReason &&
+              /^(?:network|connection|upstream)[-_\s]?error$/i.test(rawFinishReason)
+            ) {
+              throw new Error(
+                `Provider finished with reason "${rawFinishReason}" — upstream connection failed mid-stream`,
+              )
+            }
             const usage = commandCodeUsage(event)
             if (usage) {
               const details = commandCodeInputTokenDetails(usage)
@@ -507,6 +518,10 @@ export function createStreamCommandCode(deps: CoreDependencies) {
             break
           }
 
+          case "abort": {
+            throw abortError("Request aborted")
+          }
+
           case "error": {
             const message =
               commandCodeErrorMessage(event.error) ??
@@ -524,7 +539,11 @@ export function createStreamCommandCode(deps: CoreDependencies) {
         if (controller.signal.aborted) throw abortError("Aborted")
 
         const workingDir = cwd()
-        const threadId = uuid()
+        const threadId = options?.sessionId
+          ? isUuid(options.sessionId)
+            ? options.sessionId
+            : undefined
+          : uuid()
         const reasoningEffort = mappedReasoningEffort(model, options)
         const timeoutMs = options?.timeoutMs
 
@@ -552,8 +571,8 @@ export function createStreamCommandCode(deps: CoreDependencies) {
             tools: toolsToJson(context.tools),
             system: systemPromptToText(context.systemPrompt),
             max_tokens: generateMaxTokens(model, options),
-            temperature: 0.3,
             stream: true,
+            ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
             ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
           },
           threadId,
@@ -583,7 +602,8 @@ export function createStreamCommandCode(deps: CoreDependencies) {
           "x-cli-environment": "production",
           "x-project-slug": projectSlugFromPath(workingDir),
           "x-taste-learning": "true",
-          "x-co-flag": "false",
+          ...(options?.sessionId ? { "x-session-id": options.sessionId } : {}),
+          "User-Agent": "cli",
           ...options?.headers,
         }
         const bodyStr = JSON.stringify(body)
@@ -696,6 +716,11 @@ export function createStreamCommandCode(deps: CoreDependencies) {
                 const { done, value } = await raceAbort(reader.read(), attemptController.signal)
                 if (done) {
                   if (buffer.trim()) handleEvent(parseStreamEventLine(buffer))
+                  if (!finished) {
+                    throw new Error(
+                      "Stream ended unexpectedly before completion (no finish event) — response was truncated",
+                    )
+                  }
                   break
                 }
                 if (controller.signal.aborted) throw abortError("Aborted")
@@ -719,7 +744,12 @@ export function createStreamCommandCode(deps: CoreDependencies) {
               } catch {}
               reader = undefined
 
-              if (controller.signal.aborted) throw streamError
+              if (
+                controller.signal.aborted ||
+                (streamError instanceof Error && streamError.name === "AbortError")
+              ) {
+                throw streamError
+              }
 
               // Never retry after visible content was emitted (including timeout mid-stream).
               const canRetry = output.content.length === 0 && attempt < maxRetries
@@ -756,7 +786,10 @@ export function createStreamCommandCode(deps: CoreDependencies) {
           }
         }
       } catch (error: unknown) {
-        const reason: ErrorReason = controller.signal.aborted ? "aborted" : "error"
+        const reason: ErrorReason =
+          controller.signal.aborted || (error instanceof Error && error.name === "AbortError")
+            ? "aborted"
+            : "error"
         output.stopReason = reason
         output.errorMessage =
           reason === "aborted"

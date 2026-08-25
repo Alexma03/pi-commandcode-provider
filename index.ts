@@ -26,6 +26,7 @@ import {
   getModelsTimeoutMs,
   inputModalitiesForModel,
   loadCommandCodeModels,
+  MODEL_EFFORTS,
   thinkingMetadataForModel,
   type CommandCodeModel,
 } from "./src/models.ts"
@@ -37,7 +38,7 @@ import { createCommandCodeRuntime } from "./src/runtime.ts"
 import { createCommandCodeTransportRouter } from "./src/transport.ts"
 
 function commandCodeHeaders(): Record<string, string> | undefined {
-  if (process.env.COMMANDCODE_ZDR === "1") {
+  if (process.env.CMD_ZDR === "1" || process.env.COMMANDCODE_ZDR === "1") {
     return { "x-cmd-zdr": "1" }
   }
   return undefined
@@ -52,7 +53,7 @@ function createProviderConfig(
   return {
     name: "Command Code",
     baseUrl: apiBase,
-    apiKey: getConfiguredApiKey() ?? "$COMMANDCODE_API_KEY",
+    apiKey: getConfiguredApiKey() ?? "$COMMAND_CODE_API_KEY",
     api: "commandcode-custom",
     streamSimple: streamCommandCode,
     headers,
@@ -79,7 +80,7 @@ function createProviderConfig(
           ? {
               supportsStore: false,
               supportsDeveloperRole: false,
-              supportsReasoningEffort: true,
+              supportsReasoningEffort: MODEL_EFFORTS[model.id] !== undefined,
               maxTokensField: "max_tokens",
             }
           : {

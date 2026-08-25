@@ -34,6 +34,7 @@ export function getConfiguredApiKey(
   } = {},
 ): string | undefined {
   const env = options.env ?? process.env
+  if (env.COMMAND_CODE_API_KEY) return env.COMMAND_CODE_API_KEY
   if (env.COMMANDCODE_API_KEY) return env.COMMANDCODE_API_KEY
 
   const home = options.homeDir?.() ?? homedir()
