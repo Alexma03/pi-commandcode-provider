@@ -173,6 +173,87 @@ describe("streamCommandCode — successful streams", () => {
     )
   })
 
+  it("forwards a tool-result image as a following user image for vision-capable models", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [JSON.stringify({ type: "finish", finishReason: "stop" })],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    const events = await collectEvents(
+      streamCommandCode(
+        makeModel({ id: "deepseek/deepseek-v4-flash-vision-exp" }),
+        makeContext({
+          messages: [
+            { role: "user", content: "read the image" },
+            {
+              role: "assistant",
+              content: [{ type: "toolCall", id: "c1", name: "read", arguments: {} }],
+            },
+            {
+              role: "toolResult",
+              toolCallId: "c1",
+              toolName: "read",
+              content: [
+                { type: "text", text: "image attached" },
+                { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+              ],
+            },
+          ],
+        }),
+        { apiKey: "mock-key" },
+      ),
+    )
+
+    // No error: the tool-result image must not be rejected for this model.
+    assert.equal(events.at(-1)?.type, "done")
+
+    const body = server.lastRequestBody()
+    // The tool-result text is forwarded on the tool message at index 2.
+    assert.equal(
+      objectAt(body, ["params", "messages", "2", "content", "0", "output", "value"]),
+      "image attached",
+    )
+    // The tool-result image is forwarded as a following user image message at index 3.
+    assert.equal(objectAt(body, ["params", "messages", "3", "role"]), "user")
+    assert.equal(
+      objectAt(body, ["params", "messages", "3", "content", "0", "image"]),
+      "data:image/png;base64,aGVsbG8=",
+    )
+  })
+
+  it("rejects a tool-result image before network access for text-only models", async () => {
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    const events = await collectEvents(
+      streamCommandCode(
+        makeModel({ id: "deepseek/deepseek-v4-pro" }),
+        makeContext({
+          messages: [
+            { role: "user", content: "read the image" },
+            {
+              role: "assistant",
+              content: [{ type: "toolCall", id: "c1", name: "read", arguments: {} }],
+            },
+            {
+              role: "toolResult",
+              toolCallId: "c1",
+              toolName: "read",
+              content: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }],
+            },
+          ],
+        }),
+        { apiKey: "mock-key" },
+      ),
+    )
+
+    const lastEvent = events.at(-1)
+    assert.equal(lastEvent?.type, "error")
+    if (lastEvent?.type !== "error") throw new Error("expected error event")
+    assert.match(lastEvent.error.errorMessage ?? "", /does not support image content/i)
+    assert.equal(server.requestCount(), 0)
+  })
+
   it("rejects images before network access for text-only models", async () => {
     const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
 

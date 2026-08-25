@@ -103,11 +103,16 @@ describe("commandCodeModelsFromApiResponse()", () => {
   it("matches command-code@1.32.1 image input capabilities", () => {
     assert.deepEqual(inputModalitiesForModel("gpt-5.6-luna"), ["text", "image"])
     assert.deepEqual(inputModalitiesForModel("meta/muse-spark-1.2"), ["text", "image"])
+    assert.deepEqual(inputModalitiesForModel("deepseek/deepseek-v4-flash-vision-exp"), [
+      "text",
+      "image",
+    ])
     assert.deepEqual(inputModalitiesForModel("deepseek/deepseek-v4-pro"), ["text"])
     assert.deepEqual(inputModalitiesForModel("unknown-new-model"), ["text"])
     assert.equal(modelSupportsImageInput("gpt-5.6-luna"), true)
+    assert.equal(modelSupportsImageInput("deepseek/deepseek-v4-flash-vision-exp"), true)
     assert.equal(modelSupportsImageInput("deepseek/deepseek-v4-pro"), false)
-    assert.equal(Object.keys(MODEL_INPUT_MODALITIES).length, 37)
+    assert.equal(Object.keys(MODEL_INPUT_MODALITIES).length, 38)
   })
 
   it("marks only known reasoning models as reasoning-capable", () => {
