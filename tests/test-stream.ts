@@ -247,8 +247,10 @@ describe("streamCommandCode — successful streams", () => {
       ),
     )
 
-    assert.equal(events.at(-1)?.type, "error")
-    assert.match(events.at(-1)?.error.errorMessage ?? "", /does not support image content/i)
+    const lastEvent = events.at(-1)
+    assert.equal(lastEvent?.type, "error")
+    if (lastEvent?.type !== "error") throw new Error("expected error event")
+    assert.match(lastEvent.error.errorMessage ?? "", /does not support image content/i)
     assert.equal(server.requestCount(), 0)
   })
 
