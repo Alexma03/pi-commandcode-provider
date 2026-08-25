@@ -43,6 +43,7 @@ export const MODEL_INPUT_MODALITIES: Readonly<Record<string, readonly CommandCod
   "meta/muse-spark-1.1": ["text", "image"],
   "meta/muse-spark-1.2": ["text", "image"],
   "meta/muse-spark-1.2-contributor": ["text", "image"],
+  "deepseek/deepseek-v4-flash-vision-exp": ["text", "image"],
   "moonshotai/Kimi-K2.5": ["text", "image"],
   "moonshotai/Kimi-K2.6": ["text", "image"],
   "moonshotai/Kimi-K2.7-Code": ["text", "image"],
