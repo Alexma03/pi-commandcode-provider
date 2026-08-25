@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-08-25
+
 - Allow switching from a vision-capable model to a text-only model by omitting historical image tool results while preserving their text output; direct image prompts still fail clearly.
 - Stream incremental tool-call arguments from the `/alpha/generate` transport instead of waiting for the final complete tool-call event.
 - Add a daily GitHub Actions synchronization job that opens or updates a pull request for CLI version, image capability, reasoning, effort, and output-limit changes in the latest published Command Code catalog.
@@ -22,6 +24,13 @@
 - Refresh GPT-5.6 Terra and Luna display prices after their temporary 50% promotion ended, and display the current DeepSeek V4 off-peak rates for its time-dependent pricing.
 - Add isolated live E2E profiles for separate Go-, GOAT-, and Provider-plan credentials, covering transport selection, reasoning across turns, quota identity, aborts, tools, GOAT vision, Go image rejection, and packed-package validation.
 - Fix extension load failure on newer pi hosts that reject registering a custom API under a built-in name (`openai-completions`); register under `commandcode-custom` instead and restore the real wire API before native compat dispatch.
+
+### Contributors
+
+- @jagaliano — added the live quota dashboard and hardened its integration.
+- @omariqbalnaru — fixed custom API registration for Oh My Pi 17.4.0.
+- @ThomasByr — added GLM-5.3 pricing and reasoning levels.
+- @newCman1 — added DeepSeek V4 vision model support.
 
 ## 0.5.1 - 2026-08-11
 
