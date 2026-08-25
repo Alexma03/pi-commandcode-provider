@@ -6,6 +6,7 @@
 import assert from "node:assert/strict"
 import { after, before, beforeEach, describe, it } from "node:test"
 
+import { COMMAND_CODE_CLI_VERSION } from "../src/commandcode-catalog.ts"
 import type { AssistantMessageEvent } from "../src/core.ts"
 import { MODEL_EFFORTS, thinkingLevelMapForEfforts } from "../src/models.ts"
 import {
@@ -569,7 +570,7 @@ describe("streamCommandCode — request serialization", () => {
 
     const headers = server.lastRequestHeaders()
     assert.equal(headers.authorization, "Bearer mock-key")
-    assert.equal(headers["x-command-code-version"], "1.32.1")
+    assert.equal(headers["x-command-code-version"], COMMAND_CODE_CLI_VERSION)
     assert.equal(headers["x-project-slug"], "repo")
     assert.equal(headers["x-taste-learning"], "true")
     assert.equal(headers["x-co-flag"], "false")

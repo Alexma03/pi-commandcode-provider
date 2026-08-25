@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, it } from "node:test"
 
+import { COMMAND_CODE_CLI_VERSION } from "../src/commandcode-catalog.ts"
 import {
   apiForModelId,
   baseUrlForModel,
@@ -100,19 +101,27 @@ describe("commandCodeModelsFromApiResponse()", () => {
     )
   })
 
-  it("matches command-code@1.32.1 image input capabilities", () => {
+  it(`uses the command-code@${COMMAND_CODE_CLI_VERSION} image capability catalog`, () => {
     assert.deepEqual(inputModalitiesForModel("gpt-5.6-luna"), ["text", "image"])
     assert.deepEqual(inputModalitiesForModel("meta/muse-spark-1.2"), ["text", "image"])
     assert.deepEqual(inputModalitiesForModel("deepseek/deepseek-v4-flash-vision-exp"), [
       "text",
       "image",
     ])
+    assert.deepEqual(inputModalitiesForModel("Qwen/Qwen3.8-27B"), ["text", "image"])
+    assert.deepEqual(inputModalitiesForModel("google/gemini-3.7-flash"), ["text", "image"])
+    assert.deepEqual(inputModalitiesForModel("stealth/ox-alpha"), ["text", "image"])
     assert.deepEqual(inputModalitiesForModel("deepseek/deepseek-v4-pro"), ["text"])
+    assert.deepEqual(inputModalitiesForModel("zai-org/GLM-5.3"), ["text"])
     assert.deepEqual(inputModalitiesForModel("unknown-new-model"), ["text"])
     assert.equal(modelSupportsImageInput("gpt-5.6-luna"), true)
     assert.equal(modelSupportsImageInput("deepseek/deepseek-v4-flash-vision-exp"), true)
+    assert.equal(modelSupportsImageInput("stealth/ox-alpha"), true)
     assert.equal(modelSupportsImageInput("deepseek/deepseek-v4-pro"), false)
-    assert.equal(Object.keys(MODEL_INPUT_MODALITIES).length, 38)
+    assert.ok(Object.keys(MODEL_INPUT_MODALITIES).length > 0)
+    for (const modalities of Object.values(MODEL_INPUT_MODALITIES)) {
+      assert.deepEqual(modalities, ["text", "image"])
+    }
   })
 
   it("marks only known reasoning models as reasoning-capable", () => {
@@ -128,33 +137,14 @@ describe("commandCodeModelsFromApiResponse()", () => {
     assert.equal(models[1]?.reasoning, false)
   })
 
-  it("matches the exact command-code@1.32.1 reasoning effort catalog", () => {
-    assert.deepEqual(MODEL_EFFORTS, {
-      "Qwen/Qwen3.8-Max": ["low", "medium", "xhigh"],
-      "claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
-      "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
-      "claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
-      "claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
-      "claude-sonnet-4-6": ["low", "medium", "high", "xhigh", "max"],
-      "claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
-      "deepseek/deepseek-v4-flash": ["high", "max"],
-      "deepseek/deepseek-v4-pro": ["high", "max"],
-      "gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
-      "gpt-5.4": ["low", "medium", "high", "xhigh"],
-      "gpt-5.4-mini": ["low", "medium", "high"],
-      "gpt-5.5": ["low", "medium", "high", "xhigh"],
-      "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
-      "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max"],
-      "gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max"],
-      "google/gemini-3.1-flash-lite": ["low", "medium", "high"],
-      "google/gemini-3.5-flash": ["low", "medium", "high"],
-      "google/gemini-3.5-flash-lite": ["low", "medium", "high"],
-      "google/gemini-3.6-flash": ["low", "medium", "high"],
-      "sakana/fugu-ultra": ["high", "xhigh"],
-      "xai/grok-4.5": ["low", "medium", "high"],
-      "zai-org/GLM-5.3": ["low", "high", "max"],
-      "zai-org/GLM-5.2": ["high", "max"],
-    })
+  it(`uses the command-code@${COMMAND_CODE_CLI_VERSION} reasoning effort catalog`, () => {
+    const validEfforts = new Set(["minimal", "low", "medium", "high", "xhigh", "max"])
+    assert.ok(Object.keys(MODEL_EFFORTS).length > 0)
+    for (const efforts of Object.values(MODEL_EFFORTS)) {
+      assert.ok(efforts.length > 0)
+      assert.equal(new Set(efforts).size, efforts.length)
+      assert.ok(efforts.every((effort) => validEfforts.has(effort)))
+    }
   })
 
   it("builds separate canonical pi and OMP metadata", () => {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a daily GitHub Actions synchronization job that opens or updates a pull request for CLI version, image capability, and reasoning-effort changes in the latest published Command Code catalog.
+- Refresh static model capabilities from `command-code@1.32.2`, including new image and reasoning metadata.
 - Add `/commandcode-quota` with live credits, plan, usage totals, and rolling-limit diagnostics from Command Code's alpha usage endpoints.
 - Add `zai-org/GLM-5.3` with its verified reasoning efforts and display pricing.
 - Prefer Command Code's Provider API (`/provider/v1/chat/completions` and `/provider/v1/messages`) and automatically fall back to the existing `/alpha/generate` transport only when the Provider API returns `403 upgrade_required` for a Go-plan account.
