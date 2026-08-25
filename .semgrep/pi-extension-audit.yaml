@@ -89,6 +89,8 @@ rules:
         - "**/*.ts"
         - "**/index.ts"
 
+
+
   # ────────────────────────────────────────────────────────────────────────
   # Supply chain: dependency injection
   # ────────────────────────────────────────────────────────────────────────
@@ -207,8 +209,8 @@ rules:
   - id: pi-extension-unusual-import
     patterns:
       - pattern-either:
-          - pattern: 'import $X from "..."'
-          - pattern: 'const $X = require("...")'
+          - pattern: "import $X from \"...\""
+          - pattern: "const $X = require(\"...\")"
       - metavariable-regex:
           metavariable: $X
           regex: "(compression|pako|zlib|tar|stream|archiver|request|axios|needle|got|superagent|node-fetch|undici)"
