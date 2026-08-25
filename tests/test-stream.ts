@@ -569,7 +569,7 @@ describe("streamCommandCode — request serialization", () => {
 
     const headers = server.lastRequestHeaders()
     assert.equal(headers.authorization, "Bearer mock-key")
-    assert.equal(headers["x-command-code-version"], "1.32.1")
+    assert.equal(headers["x-command-code-version"], "1.32.2")
     assert.equal(headers["x-project-slug"], "repo")
     assert.equal(headers["x-taste-learning"], "true")
     assert.equal(headers["x-co-flag"], "false")

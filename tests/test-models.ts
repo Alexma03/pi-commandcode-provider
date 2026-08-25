@@ -100,19 +100,24 @@ describe("commandCodeModelsFromApiResponse()", () => {
     )
   })
 
-  it("matches command-code@1.32.1 image input capabilities", () => {
+  it("matches command-code@1.32.2 image input capabilities", () => {
     assert.deepEqual(inputModalitiesForModel("gpt-5.6-luna"), ["text", "image"])
     assert.deepEqual(inputModalitiesForModel("meta/muse-spark-1.2"), ["text", "image"])
     assert.deepEqual(inputModalitiesForModel("deepseek/deepseek-v4-flash-vision-exp"), [
       "text",
       "image",
     ])
+    assert.deepEqual(inputModalitiesForModel("Qwen/Qwen3.8-27B"), ["text", "image"])
+    assert.deepEqual(inputModalitiesForModel("google/gemini-3.7-flash"), ["text", "image"])
+    assert.deepEqual(inputModalitiesForModel("stealth/ox-alpha"), ["text", "image"])
     assert.deepEqual(inputModalitiesForModel("deepseek/deepseek-v4-pro"), ["text"])
+    assert.deepEqual(inputModalitiesForModel("zai-org/GLM-5.3"), ["text"])
     assert.deepEqual(inputModalitiesForModel("unknown-new-model"), ["text"])
     assert.equal(modelSupportsImageInput("gpt-5.6-luna"), true)
     assert.equal(modelSupportsImageInput("deepseek/deepseek-v4-flash-vision-exp"), true)
+    assert.equal(modelSupportsImageInput("stealth/ox-alpha"), true)
     assert.equal(modelSupportsImageInput("deepseek/deepseek-v4-pro"), false)
-    assert.equal(Object.keys(MODEL_INPUT_MODALITIES).length, 38)
+    assert.equal(Object.keys(MODEL_INPUT_MODALITIES).length, 41)
   })
 
   it("marks only known reasoning models as reasoning-capable", () => {
@@ -128,8 +133,9 @@ describe("commandCodeModelsFromApiResponse()", () => {
     assert.equal(models[1]?.reasoning, false)
   })
 
-  it("matches the exact command-code@1.32.1 reasoning effort catalog", () => {
+  it("matches the exact command-code@1.32.2 reasoning effort catalog", () => {
     assert.deepEqual(MODEL_EFFORTS, {
+      "Qwen/Qwen3.8-27B": ["low", "medium", "xhigh"],
       "Qwen/Qwen3.8-Max": ["low", "medium", "xhigh"],
       "claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
       "claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
@@ -138,6 +144,7 @@ describe("commandCodeModelsFromApiResponse()", () => {
       "claude-sonnet-4-6": ["low", "medium", "high", "xhigh", "max"],
       "claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
       "deepseek/deepseek-v4-flash": ["high", "max"],
+      "deepseek/deepseek-v4-flash-vision-exp": ["high", "max"],
       "deepseek/deepseek-v4-pro": ["high", "max"],
       "gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
       "gpt-5.4": ["low", "medium", "high", "xhigh"],
@@ -150,10 +157,13 @@ describe("commandCodeModelsFromApiResponse()", () => {
       "google/gemini-3.5-flash": ["low", "medium", "high"],
       "google/gemini-3.5-flash-lite": ["low", "medium", "high"],
       "google/gemini-3.6-flash": ["low", "medium", "high"],
+      "google/gemini-3.7-flash": ["low", "medium", "high"],
       "sakana/fugu-ultra": ["high", "xhigh"],
+      "stealth/ox-alpha": ["low", "high", "max"],
       "xai/grok-4.5": ["low", "medium", "high"],
-      "zai-org/GLM-5.3": ["low", "high", "max"],
+      "xai/grok-4.6": ["low", "medium", "high", "xhigh"],
       "zai-org/GLM-5.2": ["high", "max"],
+      "zai-org/GLM-5.3": ["low", "high", "max"],
     })
   })
 
