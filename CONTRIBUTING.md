@@ -46,10 +46,11 @@ Run the transport-specific live tests with separate credentials:
 
 ```sh
 COMMANDCODE_E2E_GO_API_KEY_FILE=/path/to/go-key npm run test:e2e:live:go
+COMMANDCODE_E2E_GOAT_API_KEY_FILE=/path/to/goat-key npm run test:e2e:live:goat
 COMMANDCODE_E2E_PROVIDER_API_KEY_FILE=/path/to/provider-key npm run test:e2e:live:provider
 ```
 
-Use `npm run test:e2e:live:all` with both file variables to run them sequentially. Store the keys in a secret manager and export each one to a new mode-`0600` temporary file for the test; never add key files to the repository. The direct `COMMANDCODE_E2E_GO_API_KEY` and `COMMANDCODE_E2E_PROVIDER_API_KEY` variables are intended primarily for protected CI secrets.
+Use `npm run test:e2e:live:all` with the Go and GOAT file variables to run both subscription transports sequentially. Store keys in a secret manager and export each one to a new mode-`0600` temporary file for the test; never add key files to the repository. Direct `*_API_KEY` variables are intended primarily for protected CI secrets.
 
 Before opening a PR, run:
 

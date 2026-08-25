@@ -195,23 +195,26 @@ Both commands accept additional pi arguments after `--`, for example `npm run pi
 
 ### Live transport tests
 
-Keep the Go-plan and Provider-API test keys in separate secret-manager entries. Pass them through protected files so the keys do not enter shell history:
+Keep Go-, GOAT-, and optional Provider-plan test keys in separate secret-manager entries. Pass them through protected files so the keys do not enter shell history:
 
 ```sh
 COMMANDCODE_E2E_GO_API_KEY_FILE=/path/to/go-key \
   npm run test:e2e:live:go
 
+COMMANDCODE_E2E_GOAT_API_KEY_FILE=/path/to/goat-key \
+  npm run test:e2e:live:goat
+
 COMMANDCODE_E2E_PROVIDER_API_KEY_FILE=/path/to/provider-key \
   npm run test:e2e:live:provider
 
 COMMANDCODE_E2E_GO_API_KEY_FILE=/path/to/go-key \
-COMMANDCODE_E2E_PROVIDER_API_KEY_FILE=/path/to/provider-key \
+COMMANDCODE_E2E_GOAT_API_KEY_FILE=/path/to/goat-key \
   npm run test:e2e:live:all
 ```
 
-Each profile runs with an isolated Pi agent directory and asserts the selected transport through `/commandcode-status`: Go must select `generate`, while a Provider API account must select `provider`. The profile-specific `*_API_KEY` environment variables are also supported for CI secrets, but key files are preferred for local use.
+Each profile runs with an isolated Pi agent directory and asserts transport selection, reasoning across turns, quota plan identity, abort handling, tool calls, and the packed npm artifact. Go must select `generate` and reject unsupported images; GOAT must select `provider` and complete a live vision request. The profile-specific `*_API_KEY` environment variables are also supported for CI secrets, but key files are preferred for local use.
 
-Override the default DeepSeek test model with `COMMANDCODE_E2E_GO_MODEL` or `COMMANDCODE_E2E_PROVIDER_MODEL`. A successful live Anthropic `/provider/v1/messages` test requires a Provider API account whose plan includes the selected Claude model.
+The Go profile defaults to DeepSeek V4 Flash; GOAT defaults to Grok 4.6 because its Provider API stream exposes reasoning consistently across consecutive turns. Override them with `COMMANDCODE_E2E_GO_MODEL`, `COMMANDCODE_E2E_GOAT_MODEL`, or `COMMANDCODE_E2E_PROVIDER_MODEL`. A successful live Anthropic `/provider/v1/messages` test requires a paid account whose plan includes the selected Claude model.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and tests. See [RELEASE.md](RELEASE.md) for the release process.
 
