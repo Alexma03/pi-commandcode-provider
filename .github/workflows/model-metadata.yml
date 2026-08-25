@@ -1,6 +1,14 @@
 name: Command Code model metadata
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/scripts/check-commandcode-model-metadata.ts"
+      - ".github/workflows/model-metadata.yml"
+      - "src/core.ts"
+      - "src/models.ts"
+      - "tests/test-model-metadata-check.ts"
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
