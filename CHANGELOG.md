@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Stream incremental tool-call arguments from the `/alpha/generate` transport instead of waiting for the final complete tool-call event.
 - Add a daily GitHub Actions synchronization job that opens or updates a pull request for CLI version, image capability, and reasoning-effort changes in the latest published Command Code catalog.
 - Refresh static model capabilities from `command-code@1.32.2`, including new image and reasoning metadata.
 - Add `/commandcode-quota` with live credits, plan, usage totals, and rolling-limit diagnostics from Command Code's alpha usage endpoints.
