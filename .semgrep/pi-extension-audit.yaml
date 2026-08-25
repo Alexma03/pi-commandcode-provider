@@ -89,8 +89,6 @@ rules:
         - "**/*.ts"
         - "**/index.ts"
 
-
-
   # ────────────────────────────────────────────────────────────────────────
   # Supply chain: dependency injection
   # ────────────────────────────────────────────────────────────────────────
@@ -209,8 +207,8 @@ rules:
   - id: pi-extension-unusual-import
     patterns:
       - pattern-either:
-          - pattern: "import $X from \"...\""
-          - pattern: "const $X = require(\"...\")"
+          - pattern: 'import $X from "..."'
+          - pattern: 'const $X = require("...")'
       - metavariable-regex:
           metavariable: $X
           regex: "(compression|pako|zlib|tar|stream|archiver|request|axios|needle|got|superagent|node-fetch|undici)"
@@ -256,10 +254,10 @@ rules:
       - pattern: process.env.$VAR
       - metavariable-regex:
           metavariable: $VAR
-          regex: "(?!COMMANDCODE_|NODE_|PATH|HOME|SHELL|USER|LANG|LC_|TERM|TMPDIR|NIX_).*"
+          regex: "(?!COMMANDCODE_|COMMAND_CODE_|CMD_ZDR|NODE_|PATH|HOME|SHELL|USER|LANG|LC_|TERM|TMPDIR|NIX_).*"
     message: >
       Reading unexpected environment variable $VAR. Provider should only
-      read COMMANDCODE_* variables.
+      read documented Command Code or standard runtime variables.
     severity: WARNING
     languages: [javascript, typescript]
     paths:
@@ -270,4 +268,3 @@ rules:
   # ────────────────────────────────────────────────────────────────────────
   # OAuth flow manipulation
   # ────────────────────────────────────────────────────────────────────────
-
