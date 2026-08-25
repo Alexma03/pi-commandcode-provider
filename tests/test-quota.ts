@@ -8,15 +8,18 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
+import { formatQuota, formatWindowLimits } from "../src/quota-format.ts"
 import {
   DEFAULT_API_BASE,
   fetchCommandCodeQuota,
-  formatQuota,
-  formatWindowLimits,
   redactValue,
   windowLimitsFromCredits,
 } from "../src/quota.ts"
-import type { CommandCodeQuota, CommandCodeCredits, CommandCodeWindowLimit } from "../src/quota.ts"
+import type {
+  CommandCodeCredits,
+  CommandCodeQuota,
+  CommandCodeWindowLimit,
+} from "../src/quota-types.ts"
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -71,7 +74,7 @@ describe("Command Code quota", () => {
     assert.equal(limits[1]?.resetAt, 1_700_000_000)
   })
 
-  it("renders a zero request count instead of dropping the Requests line", () => {
+  it("renders valid zero usage without claiming an unknown billing period", () => {
     const quota: CommandCodeQuota = {
       account: { login: "alice", orgId: null },
       credits: null,
@@ -79,6 +82,8 @@ describe("Command Code quota", () => {
       summary: { totalCost: 0, totalCount: 0 },
     }
     const output = formatQuota(quota, () => 1_700_000_000_000)
+    assert.match(output, /Usage\n/)
+    assert.doesNotMatch(output, /billing period/)
     assert.match(output, /Requests: 0/)
   })
 
@@ -158,6 +163,20 @@ describe("Command Code quota", () => {
     }
   })
 
+  it("rejects unrecognized successful endpoint schemas instead of displaying zero usage", async () => {
+    const fetchImpl = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input)
+      if (url.includes("whoami")) return jsonResponse({ user: { userName: "alice" }, org: null })
+      return jsonResponse({ changed: "schema" })
+    }
+
+    const result = await fetchCommandCodeQuota({ apiKey: "cc_test_key", fetchImpl })
+    assert.equal(result.ok, false)
+    if (result.ok) return
+    assert.equal(result.error.kind, "http")
+    assert.match(result.error.message, /no recognized usage data/i)
+  })
+
   it("degrades gracefully when individual billing endpoints fail", async () => {
     const fetchImpl = async (input: RequestInfo | URL): Promise<Response> => {
       const url = String(input)
@@ -174,6 +193,8 @@ describe("Command Code quota", () => {
     if (!result.ok) return
     assert.equal(result.quota.credits, null)
     assert.equal(result.quota.summary?.totalCost, 3.0)
+    assert.deepEqual(result.quota.unavailable, ["credits", "subscription"])
+    assert.match(formatQuota(result.quota), /Unavailable: credits, subscription/)
     // Optional aggregate tokens are parsed when the summary reports them.
     assert.equal(result.quota.summary?.totalTokens, undefined)
   })
@@ -194,6 +215,7 @@ describe("Command Code quota", () => {
     assert.equal(result.quota.credits, null)
     assert.equal(result.quota.subscription?.planId, "pro")
     assert.equal(result.quota.summary?.totalCost, 3.0)
+    assert.deepEqual(result.quota.unavailable, ["credits"])
   })
 
   it("fails the command when the summary endpoint rejects auth/permission", async () => {
@@ -299,8 +321,8 @@ describe("Command Code quota", () => {
       subscription: {
         planId: "pro",
         status: "active",
-        currentPeriodStart: "",
-        currentPeriodEnd: "",
+        currentPeriodStart: "2026-01-01T00:00:00Z",
+        currentPeriodEnd: "2026-02-01T00:00:00Z",
       },
       summary: { totalCost: 12.34, totalCount: 1500 },
     }
@@ -312,10 +334,10 @@ describe("Command Code quota", () => {
     assert.match(output, /Used: \$12\.34/)
     assert.match(output, /Sources: monthly \$40\.00 \/ purchased \$10\.00 \/ free \$5\.00/)
     assert.match(output, /Plan: pro \(active\)/)
-    assert.match(output, /Usage \(this month\)/)
+    assert.match(output, /Usage \(billing period\)/)
     assert.match(output, /Cost: \$12\.34/)
     assert.match(output, /Requests: 1,500/)
-    assert.match(output, /Username/)
+    assert.match(output, /Account/)
     assert.match(output, /alice-inc/)
     assert.match(output, /5-hour: 8\.00 \/ 16\.00 credits/)
     assert.match(output, /Weekly: 20\.00 \/ 40\.00 credits/)
