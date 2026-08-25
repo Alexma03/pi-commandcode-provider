@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add `zai-org/GLM-5.3` with its verified reasoning efforts and display pricing.
 - Prefer Command Code's Provider API (`/provider/v1/chat/completions` and `/provider/v1/messages`) and automatically fall back to the existing `/alpha/generate` transport only when the Provider API returns `403 upgrade_required` for a Go-plan account.
 - Remember the detected transport for the running process, re-detect it when credentials change, prevent stale in-flight requests from overwriting the new credential's transport, and never fall back for unrelated authentication, permission, rate-limit, network, or server failures.
 - Use Pi's native OpenAI- and Anthropic-compatible providers for Provider API streaming, including adaptive thinking for current reasoning-capable Claude models, while preserving the existing hardened generate transport, dynamic model discovery, offline cache, refresh/status commands, pricing, and OAuth credentials.
