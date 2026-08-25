@@ -21,10 +21,17 @@ async function withAuthFile(
 }
 
 describe("getConfiguredApiKey()", () => {
-  it("prefers the environment variable", () => {
+  it("prefers the official environment variable and keeps the legacy alias", () => {
     assert.equal(
-      getConfiguredApiKey({ env: { COMMANDCODE_API_KEY: "env-key" }, authPaths: [] }),
-      "env-key",
+      getConfiguredApiKey({
+        env: { COMMAND_CODE_API_KEY: "official-key", COMMANDCODE_API_KEY: "legacy-key" },
+        authPaths: [],
+      }),
+      "official-key",
+    )
+    assert.equal(
+      getConfiguredApiKey({ env: { COMMANDCODE_API_KEY: "legacy-key" }, authPaths: [] }),
+      "legacy-key",
     )
   })
 

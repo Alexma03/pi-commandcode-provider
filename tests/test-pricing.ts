@@ -27,7 +27,7 @@ const fixtureUrl = new URL("./fixtures/commandcode-model-ids.json", import.meta.
 const fixture = JSON.parse(await readFile(fixtureUrl, "utf-8")) as ModelCatalogSnapshot
 const pricingFixtureUrl = new URL("./fixtures/commandcode-pricing.json", import.meta.url)
 const pricingFixture = JSON.parse(await readFile(pricingFixtureUrl, "utf-8")) as PricingSnapshot
-const freeModels = new Set(["poolside/laguna-s-2.1-free", "inclusionai/ling-3.0-flash-free"])
+const freeModels = new Set(["poolside/laguna-s-2.1-free", "stealth/ox-alpha"])
 
 function assertCost(
   modelId: string,
@@ -50,7 +50,7 @@ function assertCost(
 describe("MODEL_COSTS pricing overlay", () => {
   it("covers the current Command Code model catalog snapshot", () => {
     assert.equal(fixture.source, "https://api.commandcode.ai/provider/v1/models")
-    assert.match(fixture.fetchedAt, /^2026-08-22T/)
+    assert.match(fixture.fetchedAt, /^2026-08-25T/)
 
     const catalogIds = [...fixture.modelIds].sort()
     const pricedIds = Object.keys(MODEL_COSTS).sort()
@@ -138,6 +138,24 @@ describe("MODEL_COSTS pricing overlay", () => {
       cacheRead: 0.03,
       cacheWrite: 0,
     })
+    assertCost("Qwen/Qwen3.8-27B", {
+      input: 0.4,
+      output: 3,
+      cacheRead: 0.04,
+      cacheWrite: 0,
+    })
+    assertCost("google/gemini-3.7-flash", {
+      input: 0.75,
+      output: 3.75,
+      cacheRead: 0.075,
+      cacheWrite: 0.04167,
+    })
+    assertCost("meta/muse-spark-1.2-contributor", {
+      input: 0.1,
+      output: 0.2,
+      cacheRead: 0.002,
+      cacheWrite: 0,
+    })
   })
 
   it("uses the documented base rates for context-dependent models", () => {
@@ -165,11 +183,20 @@ describe("MODEL_COSTS pricing overlay", () => {
       cacheRead: 0.02,
       cacheWrite: 0.25,
     })
+    assert.deepEqual(MODEL_COSTS["xai/grok-4.6"]?.tiers, [
+      {
+        inputTokensAbove: 200_000,
+        input: 4,
+        output: 12,
+        cacheRead: 1,
+        cacheWrite: 0,
+      },
+    ])
   })
 
   it("tracks pricing provenance", () => {
     assert.equal(PRICING_SOURCE_URL, "https://commandcode.ai/docs/resources/pricing-limits")
-    assert.equal(PRICING_LAST_VERIFIED, "2026-08-22")
+    assert.equal(PRICING_LAST_VERIFIED, "2026-08-25")
   })
 
   it("fails once temporary pricing needs review", () => {

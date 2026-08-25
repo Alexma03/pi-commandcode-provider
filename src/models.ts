@@ -4,11 +4,13 @@ import { dirname } from "node:path"
 import {
   MODEL_EFFORTS,
   MODEL_INPUT_MODALITIES,
+  MODEL_MAX_OUTPUT_TOKENS,
+  MODEL_REASONING,
   type CommandCodeInputType,
   type CommandCodeReasoningEffort,
 } from "./commandcode-catalog.ts"
 
-export { MODEL_EFFORTS, MODEL_INPUT_MODALITIES }
+export { MODEL_EFFORTS, MODEL_INPUT_MODALITIES, MODEL_MAX_OUTPUT_TOKENS, MODEL_REASONING }
 export type { CommandCodeInputType }
 
 export const DEFAULT_PROVIDER_API_BASE = "https://api.commandcode.ai/provider/v1"
@@ -55,7 +57,7 @@ export function thinkingLevelMapForEfforts(
 
 export interface ThinkingMetadata {
   thinkingLevelMap: Partial<Record<PiThinkingLevel, string | null>>
-  thinking: {
+  thinking?: {
     mode: "effort"
     effortMap: Partial<Record<CommandCodeReasoningEffort, string>>
     efforts: readonly CommandCodeReasoningEffort[]
@@ -64,19 +66,26 @@ export interface ThinkingMetadata {
 
 export function thinkingMetadataForModel(modelId: string): ThinkingMetadata | undefined {
   const efforts = MODEL_EFFORTS[modelId]
-  if (!efforts) return undefined
-  return {
-    thinkingLevelMap: thinkingLevelMapForEfforts(efforts),
-    thinking: {
-      mode: "effort",
-      effortMap: Object.fromEntries(efforts.map((effort) => [effort, effort])),
-      efforts,
-    },
+  if (efforts) {
+    return {
+      thinkingLevelMap: thinkingLevelMapForEfforts(efforts),
+      thinking: {
+        mode: "effort",
+        effortMap: Object.fromEntries(efforts.map((effort) => [effort, effort])),
+        efforts,
+      },
+    }
   }
+  if (!isReasoningModel(modelId)) return undefined
+  return { thinkingLevelMap: thinkingLevelMapForEfforts([]) }
 }
 
 function isReasoningModel(modelId: string): boolean {
-  return MODEL_EFFORTS[modelId] !== undefined
+  return MODEL_REASONING[modelId] === true
+}
+
+function maxOutputTokensForModel(modelId: string, contextLength: number): number {
+  return Math.min(contextLength, MODEL_MAX_OUTPUT_TOKENS[modelId] ?? DEFAULT_MAX_OUTPUT_TOKENS)
 }
 
 interface ApiModel {
@@ -162,13 +171,15 @@ function parseCachedModel(value: unknown): CommandCodeModel {
 
   const id = stringField(value, "id")
   booleanField(value, "reasoning")
+  positiveNumberField(value, "maxTokens")
+  const contextWindow = positiveNumberField(value, "contextWindow")
   return {
     id,
     name: stringField(value, "name"),
     api: apiForModelId(id),
     reasoning: isReasoningModel(id),
-    contextWindow: positiveNumberField(value, "contextWindow"),
-    maxTokens: positiveNumberField(value, "maxTokens"),
+    contextWindow,
+    maxTokens: maxOutputTokensForModel(id, contextWindow),
   }
 }
 
@@ -273,7 +284,7 @@ export function commandCodeModelsFromApiResponse(value: unknown): readonly Comma
     api: apiForModelId(model.id),
     reasoning: isReasoningModel(model.id),
     contextWindow: model.contextLength,
-    maxTokens: Math.min(model.contextLength, DEFAULT_MAX_OUTPUT_TOKENS),
+    maxTokens: maxOutputTokensForModel(model.id, model.contextLength),
   }))
 }
 

@@ -5,6 +5,7 @@ import {
   commandCodeModelMetadataFromContents,
   diffModelMetadata,
   hasModelMetadataDiff,
+  parseBundleModelCapabilities,
   parseKnownTextOnlyModelIds,
   parseModelsReference,
   parsePackageVersion,
@@ -21,7 +22,7 @@ const MODELS_REFERENCE = `
 `
 
 const CLI_BUNDLE =
-  'const catalog=new Set(["text-model"]),__name(isKnownTextOnlyModel,"isKnownTextOnlyModel")'
+  'const V={id:"vision-model",inputModalities:["text","image"],reasoning:!0,reasoningEfforts:["low","high"],maxOutputTokens:32768},T={id:"text-model",inputModalities:["text"]},catalog=new Set(["text-model"]),__name(isKnownTextOnlyModel,"isKnownTextOnlyModel")'
 
 describe("Command Code model metadata checker", () => {
   it("parses model ids and reasoning efforts from the generated reference", () => {
@@ -42,29 +43,39 @@ describe("Command Code model metadata checker", () => {
     assert.throws(() => parsePackageVersion("latest"), /one semantic version/)
   })
 
-  it("derives image support by excluding known text-only models", () => {
+  it("derives image, reasoning, effort, and output-limit metadata", () => {
+    assert.deepEqual(parseBundleModelCapabilities(CLI_BUNDLE, ["text-model", "vision-model"]), {
+      reasoningModelIds: ["vision-model"],
+      maxOutputTokens: { "vision-model": 32_768 },
+    })
     assert.deepEqual(commandCodeModelMetadataFromContents(MODELS_REFERENCE, CLI_BUNDLE), {
       imageModelIds: ["vision-model"],
+      reasoningModelIds: ["vision-model"],
       reasoningEfforts: { "vision-model": ["low", "high"] },
+      maxOutputTokens: { "vision-model": 32_768 },
     })
   })
 
   it("reports additions, removals, and changed reasoning efforts", () => {
     const current: CommandCodeModelMetadata = {
       imageModelIds: ["removed-image", "stable-image"],
+      reasoningModelIds: ["removed-reasoning", "stable-reasoning"],
       reasoningEfforts: {
-        "changed-reasoning": ["low"],
-        "removed-reasoning": ["high"],
-        "stable-reasoning": ["low", "high"],
+        "changed-effort": ["low"],
+        "removed-effort": ["high"],
+        "stable-effort": ["low", "high"],
       },
+      maxOutputTokens: { "changed-output": 1, "removed-output": 2, "stable-output": 3 },
     }
     const upstream: CommandCodeModelMetadata = {
       imageModelIds: ["added-image", "stable-image"],
+      reasoningModelIds: ["added-reasoning", "stable-reasoning"],
       reasoningEfforts: {
-        "added-reasoning": ["max"],
-        "changed-reasoning": ["low", "high"],
-        "stable-reasoning": ["low", "high"],
+        "added-effort": ["max"],
+        "changed-effort": ["low", "high"],
+        "stable-effort": ["low", "high"],
       },
+      maxOutputTokens: { "added-output": 4, "changed-output": 5, "stable-output": 3 },
     }
 
     const diff = diffModelMetadata(current, upstream)
@@ -75,7 +86,12 @@ describe("Command Code model metadata checker", () => {
       removedImageModelIds: ["removed-image"],
       addedReasoningModelIds: ["added-reasoning"],
       removedReasoningModelIds: ["removed-reasoning"],
-      changedReasoningModelIds: ["changed-reasoning"],
+      addedEffortModelIds: ["added-effort"],
+      removedEffortModelIds: ["removed-effort"],
+      changedEffortModelIds: ["changed-effort"],
+      addedMaxOutputModelIds: ["added-output"],
+      removedMaxOutputModelIds: ["removed-output"],
+      changedMaxOutputModelIds: ["changed-output"],
     })
     assert.equal(hasModelMetadataDiff(diff), true)
   })
@@ -83,7 +99,9 @@ describe("Command Code model metadata checker", () => {
   it("reports CLI version drift even when model metadata is unchanged", () => {
     const metadata: CommandCodeModelMetadata = {
       imageModelIds: ["vision-model"],
+      reasoningModelIds: ["vision-model"],
       reasoningEfforts: { "vision-model": ["low"] },
+      maxOutputTokens: { "vision-model": 32_768 },
     }
 
     const diff = diffModelMetadata(metadata, metadata, "1.32.2", "1.33.0")
@@ -96,10 +114,12 @@ describe("Command Code model metadata checker", () => {
     assert.equal(
       renderCommandCodeCatalog("1.33.0", {
         imageModelIds: ["b-model", "a-model"],
+        reasoningModelIds: ["c-model", "a-model"],
         reasoningEfforts: {
           "b-model": ["high", "max"],
           "a-model": ["low"],
         },
+        maxOutputTokens: { "b-model": 32_768 },
       }),
       `export const COMMAND_CODE_CLI_VERSION = "1.33.0"
 
@@ -115,9 +135,18 @@ export const MODEL_INPUT_MODALITIES: Readonly<Record<string, readonly CommandCod
   "b-model": ["text", "image"],
 }
 
+export const MODEL_REASONING: Readonly<Record<string, true>> = {
+  "a-model": true,
+  "c-model": true,
+}
+
 export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {
   "a-model": ["low"],
   "b-model": ["high", "max"],
+}
+
+export const MODEL_MAX_OUTPUT_TOKENS: Readonly<Record<string, number>> = {
+  "b-model": 32_768,
 }
 `,
     )

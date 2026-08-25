@@ -107,6 +107,7 @@ export function getApiKey(
   } = {},
 ): string | undefined {
   const env = options.env ?? process.env
+  if (env.COMMAND_CODE_API_KEY) return env.COMMAND_CODE_API_KEY
   if (env.COMMANDCODE_API_KEY) return env.COMMANDCODE_API_KEY
 
   const home = options.homeDir?.() ?? homedir()
@@ -138,10 +139,11 @@ export function getApiKey(
   return undefined
 }
 
-// Hosts such as OMP may pass the literal env-var name "$COMMANDCODE_API_KEY"
-// (or "COMMANDCODE_API_KEY") as the "resolved" registry key instead of the
-// actual credential. Treat those as unresolved.
+// Hosts such as OMP may pass a literal env-var name as the "resolved" registry
+// key instead of the actual credential. Treat those as unresolved.
 export const COMMAND_CODE_PLACEHOLDER_KEYS = new Set([
+  "$COMMAND_CODE_API_KEY",
+  "COMMAND_CODE_API_KEY",
   "$COMMANDCODE_API_KEY",
   "COMMANDCODE_API_KEY",
 ])
@@ -162,6 +164,16 @@ export function pickCommandCodeApiKey(
 }
 
 export function textContent(message: { content?: unknown }): string {
+  if (typeof message.content === "string") return message.content
+  if (message.content === null || message.content === undefined) return ""
+  if (!Array.isArray(message.content)) {
+    try {
+      return JSON.stringify(message.content) ?? String(message.content)
+    } catch {
+      return String(message.content)
+    }
+  }
+
   return recordArray(message.content)
     .filter((part) => part.type === "text")
     .map((part) => stringValue(part.text) ?? "")
@@ -182,7 +194,12 @@ export function toolsToJson(tools?: readonly ToolLike[]): unknown[] {
   }))
 }
 
-function completeToolCallIds(messages?: readonly MessageLike[]): Set<string> {
+interface ToolCallState {
+  callIds: ReadonlySet<string>
+  resultIds: ReadonlySet<string>
+}
+
+function toolCallState(messages?: readonly MessageLike[]): ToolCallState {
   const callIds = new Set<string>()
   const resultIds = new Set<string>()
 
@@ -194,12 +211,12 @@ function completeToolCallIds(messages?: readonly MessageLike[]): Set<string> {
           if (id) callIds.add(id)
         }
       }
-    } else if (message.role === "toolResult") {
-      if (message.toolCallId) resultIds.add(message.toolCallId)
+    } else if (message.role === "toolResult" && message.toolCallId) {
+      resultIds.add(message.toolCallId)
     }
   }
 
-  return new Set([...callIds].filter((id) => resultIds.has(id)))
+  return { callIds, resultIds }
 }
 
 export function messagesToCC(
@@ -210,7 +227,7 @@ export function messagesToCC(
   if (!allowImages) assertTextOnlyMessages(messages)
 
   const out: unknown[] = []
-  const pairedToolCallIds = completeToolCallIds(messages)
+  const { callIds, resultIds } = toolCallState(messages)
 
   for (const message of messages ?? []) {
     if (message.role === "user") {
@@ -220,23 +237,37 @@ export function messagesToCC(
       })
     } else if (message.role === "assistant") {
       const parts: unknown[] = []
+      const missingResults: unknown[] = []
       for (const content of recordArray(message.content)) {
         if (content.type === "text") {
           parts.push({ type: "text", text: stringValue(content.text) ?? "" })
         } else if (content.type === "toolCall") {
           const toolCallId = stringValue(content.id) ?? ""
-          if (!pairedToolCallIds.has(toolCallId)) continue
+          const toolName = stringValue(content.name) ?? ""
+          if (!toolCallId) continue
           parts.push({
             type: "tool-call",
             toolCallId,
-            toolName: stringValue(content.name) ?? "",
+            toolName,
             input: recordOrEmpty(content.arguments),
           })
+          if (!resultIds.has(toolCallId)) {
+            missingResults.push({
+              type: "tool-result",
+              toolCallId,
+              toolName,
+              output: {
+                type: "error-text",
+                value: "No result — the tool call did not complete (interrupted or lost).",
+              },
+            })
+          }
         }
       }
       if (parts.length > 0) out.push({ role: "assistant", content: parts })
+      if (missingResults.length > 0) out.push({ role: "tool", content: missingResults })
     } else if (message.role === "toolResult") {
-      if (!message.toolCallId || !pairedToolCallIds.has(message.toolCallId)) continue
+      if (!message.toolCallId || !callIds.has(message.toolCallId)) continue
       out.push({
         role: "tool",
         content: [

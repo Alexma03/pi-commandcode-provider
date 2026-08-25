@@ -27,8 +27,18 @@ import { redactCommandCodeErrorText } from "../src/overflow.ts"
 import { objectAt } from "./helpers.ts"
 
 describe("getApiKey()", () => {
-  it("uses COMMANDCODE_API_KEY from provided env", () => {
-    assert.equal(getApiKey({ env: { COMMANDCODE_API_KEY: "env-key" }, authPaths: [] }), "env-key")
+  it("uses the official API key env var before the legacy alias", () => {
+    assert.equal(
+      getApiKey({
+        env: { COMMAND_CODE_API_KEY: "official-key", COMMANDCODE_API_KEY: "legacy-key" },
+        authPaths: [],
+      }),
+      "official-key",
+    )
+    assert.equal(
+      getApiKey({ env: { COMMANDCODE_API_KEY: "legacy-key" }, authPaths: [] }),
+      "legacy-key",
+    )
   })
 
   it("reads apiKey, commandcode, pi OAuth, and official CLI credential fields", () => {
@@ -109,11 +119,14 @@ describe("error redaction", () => {
 
 describe("pickCommandCodeApiKey()", () => {
   it("falls back to the host key for a placeholder registry value", () => {
+    assert.equal(pickCommandCodeApiKey("$COMMAND_CODE_API_KEY", "file-key"), "file-key")
+    assert.equal(pickCommandCodeApiKey("COMMAND_CODE_API_KEY", "file-key"), "file-key")
     assert.equal(pickCommandCodeApiKey("$COMMANDCODE_API_KEY", "file-key"), "file-key")
     assert.equal(pickCommandCodeApiKey("COMMANDCODE_API_KEY", "file-key"), "file-key")
   })
 
   it("returns undefined when only a placeholder is provided (no fallback)", () => {
+    assert.equal(pickCommandCodeApiKey("$COMMAND_CODE_API_KEY", undefined), undefined)
     assert.equal(pickCommandCodeApiKey("$COMMANDCODE_API_KEY", undefined), undefined)
   })
 
@@ -197,6 +210,12 @@ describe("textContent()", () => {
       }),
       "hello\nworld",
     )
+  })
+
+  it("normalizes malformed string and object content", () => {
+    assert.equal(textContent({ content: "raw result" }), "raw result")
+    assert.equal(textContent({ content: { ok: true } }), '{"ok":true}')
+    assert.equal(textContent({ content: null }), "")
   })
 
   it("handles empty or missing content", () => {
@@ -531,6 +550,23 @@ describe("messagesToCC()", () => {
     assert.equal(objectAt(result, ["2", "content", "0", "output", "value"]), "hello\nworld")
   })
 
+  it("preserves malformed string tool results instead of sending empty output", () => {
+    const result = messagesToCC([
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "c1", name: "read", arguments: {} }],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "c1",
+        toolName: "read",
+        content: "raw result",
+      },
+    ])
+
+    assert.equal(objectAt(result, ["1", "content", "0", "output", "value"]), "raw result")
+  })
+
   it("serializes image inputs in the current Command Code wire format", () => {
     assert.deepEqual(
       messagesToCC(
@@ -632,7 +668,7 @@ describe("messagesToCC()", () => {
     ])
   })
 
-  it("drops orphaned tool calls that have no matching tool result", () => {
+  it("synthesizes missing results for orphaned tool calls", () => {
     const result = messagesToCC([
       { role: "user", content: "edit a file" },
       {
@@ -651,7 +687,12 @@ describe("messagesToCC()", () => {
 
     assert.equal(objectAt(result, ["1", "role"]), "assistant")
     assert.equal(objectAt(result, ["1", "content", "0", "type"]), "text")
-    assert.equal(objectAt(result, ["1", "content", "1"]), undefined)
+    assert.equal(objectAt(result, ["1", "content", "1", "type"]), "tool-call")
+    assert.equal(objectAt(result, ["2", "role"]), "tool")
+    assert.match(
+      String(objectAt(result, ["2", "content", "0", "output", "value"])),
+      /did not complete/,
+    )
   })
 
   it("handles empty conversations", () => {
