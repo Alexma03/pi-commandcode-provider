@@ -9,7 +9,6 @@ import {
   parseModelsReference,
   parsePackageVersion,
   renderCommandCodeCatalog,
-  updateChangelogCatalogVersion,
   updateReadmeCatalogVersion,
   type CommandCodeModelMetadata,
 } from "../.github/scripts/check-commandcode-model-metadata.ts"
@@ -128,13 +127,6 @@ export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasonin
         "1.33.0",
       ),
       "The capability snapshot currently follows `command-code@1.33.0`.",
-    )
-    assert.equal(
-      updateChangelogCatalogVersion(
-        "- Refresh capabilities from `command-code@1.32.2`, including metadata.",
-        "1.33.0",
-      ),
-      "- Refresh capabilities from `command-code@1.33.0`, including metadata.",
     )
   })
 

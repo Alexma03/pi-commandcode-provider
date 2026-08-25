@@ -18,7 +18,6 @@ const TEXT_ONLY_MARKER = ',__name(isKnownTextOnlyModel,"isKnownTextOnlyModel")'
 const VALID_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"])
 const CATALOG_SOURCE_PATH = new URL("../../src/commandcode-catalog.ts", import.meta.url)
 const README_PATH = new URL("../../README.md", import.meta.url)
-const CHANGELOG_PATH = new URL("../../CHANGELOG.md", import.meta.url)
 
 export interface CommandCodeModelMetadata {
   imageModelIds: readonly string[]
@@ -254,22 +253,14 @@ export function updateReadmeCatalogVersion(readme: string, packageVersion: strin
   return updateDocumentedCatalogVersion(readme, packageVersion, "README")
 }
 
-export function updateChangelogCatalogVersion(changelog: string, packageVersion: string): string {
-  return updateDocumentedCatalogVersion(changelog, packageVersion, "changelog")
-}
-
 async function writeSynchronizedCatalog(
   packageVersion: string,
   metadata: CommandCodeModelMetadata,
 ): Promise<void> {
-  const [readme, changelog] = await Promise.all([
-    readFile(README_PATH, "utf-8"),
-    readFile(CHANGELOG_PATH, "utf-8"),
-  ])
+  const readme = await readFile(README_PATH, "utf-8")
   await Promise.all([
     writeFile(CATALOG_SOURCE_PATH, renderCommandCodeCatalog(packageVersion, metadata), "utf-8"),
     writeFile(README_PATH, updateReadmeCatalogVersion(readme, packageVersion), "utf-8"),
-    writeFile(CHANGELOG_PATH, updateChangelogCatalogVersion(changelog, packageVersion), "utf-8"),
   ])
 }
 
