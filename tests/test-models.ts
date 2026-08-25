@@ -16,6 +16,8 @@ import {
   loadCommandCodeModels,
   MODEL_EFFORTS,
   MODEL_INPUT_MODALITIES,
+  MODEL_MAX_OUTPUT_TOKENS,
+  MODEL_REASONING,
   modelSupportsImageInput,
   thinkingLevelMapForEfforts,
   thinkingMetadataForModel,
@@ -41,7 +43,7 @@ const EXPECTED_MODELS: readonly CommandCodeModel[] = [
     id: "Qwen/Qwen3.7-Max",
     name: "Qwen 3.7 Max (CC)",
     api: "openai-completions",
-    reasoning: false,
+    reasoning: true,
     contextWindow: 1_000_000,
     maxTokens: 65_536,
   },
@@ -124,17 +126,55 @@ describe("commandCodeModelsFromApiResponse()", () => {
     }
   })
 
-  it("marks only known reasoning models as reasoning-capable", () => {
+  it("tracks reasoning independently from selectable effort levels", () => {
     const models = commandCodeModelsFromApiResponse({
       object: "list",
       data: [
         { ...API_RESPONSE.data[0], id: "deepseek/deepseek-v4-flash" },
+        { ...API_RESPONSE.data[0], id: "moonshotai/Kimi-K3" },
         { ...API_RESPONSE.data[0], id: "new-model-without-metadata" },
       ],
     })
 
     assert.equal(models[0]?.reasoning, true)
-    assert.equal(models[1]?.reasoning, false)
+    assert.equal(models[1]?.reasoning, true)
+    assert.deepEqual(thinkingMetadataForModel("moonshotai/Kimi-K3"), {
+      thinkingLevelMap: {
+        minimal: null,
+        low: null,
+        medium: null,
+        high: null,
+        xhigh: null,
+        max: null,
+      },
+    })
+    assert.equal(models[2]?.reasoning, false)
+    assert.equal(Object.keys(MODEL_REASONING).length, 48)
+  })
+
+  it("uses model-specific output limits from the CLI catalog", () => {
+    const models = commandCodeModelsFromApiResponse({
+      object: "list",
+      data: [
+        { ...API_RESPONSE.data[0], id: "Qwen/Qwen3.8-27B", context_length: 262_144 },
+        { ...API_RESPONSE.data[0], id: "stealth/ox-alpha", context_length: 1_048_576 },
+        {
+          ...API_RESPONSE.data[0],
+          id: "poolside/laguna-s-2.1-free",
+          context_length: 256_000,
+        },
+      ],
+    })
+
+    assert.deepEqual(
+      models.map(({ id, maxTokens }) => ({ id, maxTokens })),
+      [
+        { id: "Qwen/Qwen3.8-27B", maxTokens: 32_768 },
+        { id: "stealth/ox-alpha", maxTokens: 131_072 },
+        { id: "poolside/laguna-s-2.1-free", maxTokens: 32_768 },
+      ],
+    )
+    assert.equal(Object.keys(MODEL_MAX_OUTPUT_TOKENS).length, 3)
   })
 
   it(`uses the command-code@${COMMAND_CODE_CLI_VERSION} reasoning effort catalog`, () => {
@@ -151,6 +191,7 @@ describe("commandCodeModelsFromApiResponse()", () => {
     for (const [modelId, efforts] of Object.entries(MODEL_EFFORTS)) {
       const metadata = thinkingMetadataForModel(modelId)
       assert.ok(metadata, `${modelId} should have reasoning metadata`)
+      assert.ok(metadata.thinking)
       assert.equal(metadata.thinking.mode, "effort")
       assert.deepEqual(metadata.thinking.efforts, efforts)
       assert.deepEqual(

@@ -9,6 +9,8 @@ import {
   COMMAND_CODE_CLI_VERSION,
   MODEL_EFFORTS,
   MODEL_INPUT_MODALITIES,
+  MODEL_MAX_OUTPUT_TOKENS,
+  MODEL_REASONING,
 } from "../../src/commandcode-catalog.ts"
 
 const execFileAsync = promisify(execFile)
@@ -21,7 +23,9 @@ const README_PATH = new URL("../../README.md", import.meta.url)
 
 export interface CommandCodeModelMetadata {
   imageModelIds: readonly string[]
+  reasoningModelIds: readonly string[]
   reasoningEfforts: Readonly<Record<string, readonly string[]>>
+  maxOutputTokens: Readonly<Record<string, number>>
 }
 
 export interface ModelMetadataDiff {
@@ -30,7 +34,12 @@ export interface ModelMetadataDiff {
   removedImageModelIds: readonly string[]
   addedReasoningModelIds: readonly string[]
   removedReasoningModelIds: readonly string[]
-  changedReasoningModelIds: readonly string[]
+  addedEffortModelIds: readonly string[]
+  removedEffortModelIds: readonly string[]
+  changedEffortModelIds: readonly string[]
+  addedMaxOutputModelIds: readonly string[]
+  removedMaxOutputModelIds: readonly string[]
+  changedMaxOutputModelIds: readonly string[]
 }
 
 interface PackedPackage {
@@ -123,26 +132,92 @@ export function parseKnownTextOnlyModelIds(bundle: string): readonly string[] {
   return sorted(new Set(parsed))
 }
 
+function modelObject(bundle: string, modelId: string): string {
+  const start = bundle.indexOf(`{id:${JSON.stringify(modelId)},inputModalities:`)
+  if (start < 0) throw new Error(`Could not find model metadata for ${modelId}`)
+
+  let depth = 0
+  let quote = ""
+  let escaped = false
+  for (let index = start; index < bundle.length; index += 1) {
+    const character = bundle[index] ?? ""
+    if (quote) {
+      if (escaped) escaped = false
+      else if (character === "\\") escaped = true
+      else if (character === quote) quote = ""
+      continue
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      quote = character
+      continue
+    }
+    if (character === "{") depth += 1
+    else if (character === "}" && --depth === 0) return bundle.slice(start, index + 1)
+  }
+
+  throw new Error(`Unterminated model metadata for ${modelId}`)
+}
+
+export function parseBundleModelCapabilities(
+  bundle: string,
+  modelIds: readonly string[],
+): {
+  reasoningModelIds: readonly string[]
+  maxOutputTokens: Readonly<Record<string, number>>
+} {
+  const reasoningModelIds: string[] = []
+  const maxOutputTokens: Record<string, number> = {}
+
+  for (const modelId of modelIds) {
+    const entry = modelObject(bundle, modelId)
+    if (entry.includes("reasoning:!0") || entry.includes("reasoningEfforts:[")) {
+      reasoningModelIds.push(modelId)
+    }
+    const maxOutput = /maxOutputTokens:([^,}]+)/.exec(entry)?.[1]
+    if (maxOutput) {
+      const value = Number(maxOutput)
+      if (!Number.isFinite(value) || value <= 0) {
+        throw new Error(`Unexpected max output tokens for ${modelId}: ${maxOutput}`)
+      }
+      maxOutputTokens[modelId] = value
+    }
+  }
+
+  return {
+    reasoningModelIds: sorted(reasoningModelIds),
+    maxOutputTokens: Object.fromEntries(
+      Object.entries(maxOutputTokens).sort(([left], [right]) => left.localeCompare(right)),
+    ),
+  }
+}
+
 export function commandCodeModelMetadataFromContents(
   modelsReference: string,
   cliBundle: string,
 ): CommandCodeModelMetadata {
   const reference = parseModelsReference(modelsReference)
   const textOnlyModelIds = new Set(parseKnownTextOnlyModelIds(cliBundle))
+  const capabilities = parseBundleModelCapabilities(cliBundle, reference.modelIds)
 
   return {
     imageModelIds: reference.modelIds.filter((modelId) => !textOnlyModelIds.has(modelId)),
+    reasoningModelIds: capabilities.reasoningModelIds,
     reasoningEfforts: reference.reasoningEfforts,
+    maxOutputTokens: capabilities.maxOutputTokens,
   }
 }
 
 export function currentModelMetadata(): CommandCodeModelMetadata {
   return {
     imageModelIds: sorted(Object.keys(MODEL_INPUT_MODALITIES)),
+    reasoningModelIds: sorted(Object.keys(MODEL_REASONING)),
     reasoningEfforts: Object.fromEntries(
       Object.entries(MODEL_EFFORTS)
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([modelId, efforts]) => [modelId, [...efforts]]),
+    ),
+    maxOutputTokens: Object.fromEntries(
+      Object.entries(MODEL_MAX_OUTPUT_TOKENS).sort(([left], [right]) => left.localeCompare(right)),
     ),
   }
 }
@@ -155,10 +230,16 @@ export function diffModelMetadata(
 ): ModelMetadataDiff {
   const currentImages = new Set(current.imageModelIds)
   const upstreamImages = new Set(upstream.imageModelIds)
-  const currentReasoningIds = Object.keys(current.reasoningEfforts)
-  const upstreamReasoningIds = Object.keys(upstream.reasoningEfforts)
-  const currentReasoningSet = new Set(currentReasoningIds)
-  const upstreamReasoningSet = new Set(upstreamReasoningIds)
+  const currentReasoning = new Set(current.reasoningModelIds)
+  const upstreamReasoning = new Set(upstream.reasoningModelIds)
+  const currentEffortIds = Object.keys(current.reasoningEfforts)
+  const upstreamEffortIds = Object.keys(upstream.reasoningEfforts)
+  const currentEffortSet = new Set(currentEffortIds)
+  const upstreamEffortSet = new Set(upstreamEffortIds)
+  const currentMaxOutputIds = Object.keys(current.maxOutputTokens)
+  const upstreamMaxOutputIds = Object.keys(upstream.maxOutputTokens)
+  const currentMaxOutputSet = new Set(currentMaxOutputIds)
+  const upstreamMaxOutputSet = new Set(upstreamMaxOutputIds)
 
   return {
     versionChanged: currentVersion !== upstreamVersion,
@@ -169,17 +250,36 @@ export function diffModelMetadata(
       current.imageModelIds.filter((modelId) => !upstreamImages.has(modelId)),
     ),
     addedReasoningModelIds: sorted(
-      upstreamReasoningIds.filter((modelId) => !currentReasoningSet.has(modelId)),
+      upstream.reasoningModelIds.filter((modelId) => !currentReasoning.has(modelId)),
     ),
     removedReasoningModelIds: sorted(
-      currentReasoningIds.filter((modelId) => !upstreamReasoningSet.has(modelId)),
+      current.reasoningModelIds.filter((modelId) => !upstreamReasoning.has(modelId)),
     ),
-    changedReasoningModelIds: sorted(
-      upstreamReasoningIds.filter(
+    addedEffortModelIds: sorted(
+      upstreamEffortIds.filter((modelId) => !currentEffortSet.has(modelId)),
+    ),
+    removedEffortModelIds: sorted(
+      currentEffortIds.filter((modelId) => !upstreamEffortSet.has(modelId)),
+    ),
+    changedEffortModelIds: sorted(
+      upstreamEffortIds.filter(
         (modelId) =>
-          currentReasoningSet.has(modelId) &&
+          currentEffortSet.has(modelId) &&
           JSON.stringify(current.reasoningEfforts[modelId]) !==
             JSON.stringify(upstream.reasoningEfforts[modelId]),
+      ),
+    ),
+    addedMaxOutputModelIds: sorted(
+      upstreamMaxOutputIds.filter((modelId) => !currentMaxOutputSet.has(modelId)),
+    ),
+    removedMaxOutputModelIds: sorted(
+      currentMaxOutputIds.filter((modelId) => !upstreamMaxOutputSet.has(modelId)),
+    ),
+    changedMaxOutputModelIds: sorted(
+      upstreamMaxOutputIds.filter(
+        (modelId) =>
+          currentMaxOutputSet.has(modelId) &&
+          current.maxOutputTokens[modelId] !== upstream.maxOutputTokens[modelId],
       ),
     ),
   }
@@ -229,14 +329,24 @@ export function renderCommandCodeCatalog(
   const imageEntries = sorted(metadata.imageModelIds)
     .map((modelId) => `  ${quoted(modelId)}: ["text", "image"],`)
     .join("\n")
-  const reasoningEntries = recordEntries(metadata.reasoningEfforts)
+  const reasoningEntries = sorted(metadata.reasoningModelIds)
+    .map((modelId) => `  ${quoted(modelId)}: true,`)
+    .join("\n")
+  const effortEntries = recordEntries(metadata.reasoningEfforts)
     .map(
       ([modelId, efforts]) =>
         `  ${quoted(modelId)}: [${efforts.map((effort) => quoted(effort)).join(", ")}],`,
     )
     .join("\n")
+  const maxOutputEntries = Object.entries(metadata.maxOutputTokens)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(
+      ([modelId, value]) =>
+        `  ${quoted(modelId)}: ${value.toLocaleString("en-US").replaceAll(",", "_")},`,
+    )
+    .join("\n")
 
-  return `export const COMMAND_CODE_CLI_VERSION = ${quoted(packageVersion)}\n\nexport type CommandCodeInputType = "text" | "image"\nexport type CommandCodeReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max"\n\n/**\n * Generated from command-code@${packageVersion} by \`npm run sync:commandcode-catalog\`.\n * Do not edit manually.\n */\nexport const MODEL_INPUT_MODALITIES: Readonly<Record<string, readonly CommandCodeInputType[]>> = {\n${imageEntries}\n}\n\nexport const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {\n${reasoningEntries}\n}\n`
+  return `export const COMMAND_CODE_CLI_VERSION = ${quoted(packageVersion)}\n\nexport type CommandCodeInputType = "text" | "image"\nexport type CommandCodeReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max"\n\n/**\n * Generated from command-code@${packageVersion} by \`npm run sync:commandcode-catalog\`.\n * Do not edit manually.\n */\nexport const MODEL_INPUT_MODALITIES: Readonly<Record<string, readonly CommandCodeInputType[]>> = {\n${imageEntries}\n}\n\nexport const MODEL_REASONING: Readonly<Record<string, true>> = {\n${reasoningEntries}\n}\n\nexport const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {\n${effortEntries}\n}\n\nexport const MODEL_MAX_OUTPUT_TOKENS: Readonly<Record<string, number>> = {\n${maxOutputEntries}\n}\n`
 }
 
 function updateDocumentedCatalogVersion(
@@ -279,16 +389,23 @@ function metadataReport(
     `- Repository snapshot: \`command-code@${COMMAND_CODE_CLI_VERSION}\``,
     `- Inspected package: \`command-code@${packageVersion}\``,
     `- Image-capable models: ${current.imageModelIds.length} repository / ${upstream.imageModelIds.length} upstream`,
-    `- Reasoning models: ${Object.keys(current.reasoningEfforts).length} repository / ${Object.keys(upstream.reasoningEfforts).length} upstream`,
+    `- Reasoning models: ${current.reasoningModelIds.length} repository / ${upstream.reasoningModelIds.length} upstream`,
+    `- Models with selectable efforts: ${Object.keys(current.reasoningEfforts).length} repository / ${Object.keys(upstream.reasoningEfforts).length} upstream`,
+    `- Model-specific output limits: ${Object.keys(current.maxOutputTokens).length} repository / ${Object.keys(upstream.maxOutputTokens).length} upstream`,
     "",
     "| Change | Models |",
     "| --- | --- |",
     `| CLI version | ${diff.versionChanged ? `\`${COMMAND_CODE_CLI_VERSION}\` → \`${packageVersion}\`` : "Current"} |`,
     `| New image support | ${formatList(diff.addedImageModelIds)} |`,
     `| Removed image support | ${formatList(diff.removedImageModelIds)} |`,
-    `| New reasoning metadata | ${formatList(diff.addedReasoningModelIds)} |`,
-    `| Removed reasoning metadata | ${formatList(diff.removedReasoningModelIds)} |`,
-    `| Changed reasoning efforts | ${formatReasoningChanges(diff.changedReasoningModelIds, current, upstream)} |`,
+    `| New reasoning models | ${formatList(diff.addedReasoningModelIds)} |`,
+    `| Removed reasoning models | ${formatList(diff.removedReasoningModelIds)} |`,
+    `| New effort metadata | ${formatList(diff.addedEffortModelIds)} |`,
+    `| Removed effort metadata | ${formatList(diff.removedEffortModelIds)} |`,
+    `| Changed reasoning efforts | ${formatReasoningChanges(diff.changedEffortModelIds, current, upstream)} |`,
+    `| New output limits | ${formatList(diff.addedMaxOutputModelIds)} |`,
+    `| Removed output limits | ${formatList(diff.removedMaxOutputModelIds)} |`,
+    `| Changed output limits | ${formatList(diff.changedMaxOutputModelIds)} |`,
     "",
   ].join("\n")
 }

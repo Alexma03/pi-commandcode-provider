@@ -20,7 +20,7 @@ export interface TemporaryPricing {
 }
 
 export const PRICING_SOURCE_URL = "https://commandcode.ai/docs/resources/pricing-limits"
-export const PRICING_LAST_VERIFIED = "2026-08-22"
+export const PRICING_LAST_VERIFIED = "2026-08-25"
 
 export const ZERO_MODEL_COST: CommandCodeModelCost = {
   input: 0,
@@ -40,7 +40,7 @@ export const ZERO_MODEL_COST: CommandCodeModelCost = {
 export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
   // Free models
   "poolside/laguna-s-2.1-free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  "inclusionai/ling-3.0-flash-free": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "stealth/ox-alpha": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 
   // Open and open-weight models
   "tencent/hy3-paid": { input: 0.14, output: 0.58, cacheRead: 0.035, cacheWrite: 0 },
@@ -76,7 +76,14 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
     cacheRead: 0.007,
     cacheWrite: 0,
   },
+  "deepseek/deepseek-v4-flash-vision-exp": {
+    input: 0.22,
+    output: 0.66,
+    cacheRead: 0.007,
+    cacheWrite: 0,
+  },
   "Qwen/Qwen3.8-Max": { input: 2, output: 6, cacheRead: 0.25, cacheWrite: 2.5 },
+  "Qwen/Qwen3.8-27B": { input: 0.4, output: 3, cacheRead: 0.04, cacheWrite: 0 },
   "Qwen/Qwen3.7-Max": { input: 2.5, output: 7.5, cacheRead: 0.5, cacheWrite: 3.13 },
   "Qwen/Qwen3.7-Plus": {
     input: 0.4,
@@ -142,6 +149,13 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
     cacheWrite: 0,
   },
   "meta/muse-spark-1.1": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
+  "meta/muse-spark-1.2": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
+  "meta/muse-spark-1.2-contributor": {
+    input: 0.1,
+    output: 0.2,
+    cacheRead: 0.002,
+    cacheWrite: 0,
+  },
 
   // Anthropic
   // Introductory pricing through 2026-08-31.
@@ -168,6 +182,12 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
   "gpt-5.4-mini": { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0 },
 
   // Google and xAI
+  "google/gemini-3.7-flash": {
+    input: 0.75,
+    output: 3.75,
+    cacheRead: 0.075,
+    cacheWrite: 0.04167,
+  },
   "google/gemini-3.6-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 },
   "google/gemini-3.5-flash": { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 0 },
   "google/gemini-3.5-flash-lite": {
@@ -183,6 +203,21 @@ export const MODEL_COSTS: Readonly<Record<string, CommandCodeModelCost>> = {
     cacheWrite: 0,
   },
   "xai/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 },
+  "xai/grok-4.6": {
+    input: 2,
+    output: 6,
+    cacheRead: 0.5,
+    cacheWrite: 0,
+    tiers: [
+      {
+        inputTokensAbove: 200_000,
+        input: 4,
+        output: 12,
+        cacheRead: 1,
+        cacheWrite: 0,
+      },
+    ],
+  },
 }
 
 export const TEMPORARY_PRICING: readonly TemporaryPricing[] = [
@@ -190,5 +225,10 @@ export const TEMPORARY_PRICING: readonly TemporaryPricing[] = [
     models: ["claude-sonnet-5"],
     expiresOn: "2026-08-31",
     description: "introductory pricing",
+  },
+  {
+    models: ["google/gemini-3.7-flash"],
+    expiresOn: "2026-12-31",
+    description: "50% promotional pricing",
   },
 ]
