@@ -48,6 +48,7 @@ function findPiBinary() {
 
 function hasAuthMetadata() {
   return (
+    Boolean(process.env.COMMAND_CODE_API_KEY) ||
     Boolean(process.env.COMMANDCODE_API_KEY) ||
     existsSync(join(homedir(), ".commandcode", "auth.json")) ||
     existsSync(join(homedir(), ".pi", "agent", "auth.json"))
@@ -70,6 +71,7 @@ function safeEnv(overrides = {}) {
     env.PI_CODING_AGENT_DIR = profileAgentDir
     env.COMMANDCODE_MODELS_CACHE = join(profileAgentDir, "commandcode-models.json")
   } else {
+    delete env.COMMAND_CODE_API_KEY
     delete env.COMMANDCODE_API_KEY
   }
   return env

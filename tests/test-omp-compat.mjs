@@ -133,7 +133,7 @@ function runOmp(args, timeoutMs = 30_000) {
         HOME: tempHome,
         USERPROFILE: tempHome,
         PI_CODING_AGENT_DIR: join(tempHome, ".omp", "agent"),
-        COMMANDCODE_API_KEY: "mock-key",
+        COMMAND_CODE_API_KEY: "mock-key",
         COMMANDCODE_API_BASE: `${apiBase}/provider/v1`,
         COMMANDCODE_MODELS_URL: `${apiBase}/provider/v1/models`,
       },

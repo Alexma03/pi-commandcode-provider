@@ -39,10 +39,11 @@ function runProfile(profile, apiKey) {
   const model = process.env[modelVariable] ?? "deepseek/deepseek-v4-flash"
   const env = {
     ...process.env,
-    COMMANDCODE_API_KEY: apiKey,
+    COMMAND_CODE_API_KEY: apiKey,
     COMMANDCODE_E2E_MODEL: model,
     COMMANDCODE_E2E_PROFILE: profile,
   }
+  delete env.COMMANDCODE_API_KEY
   delete env.COMMANDCODE_E2E_GO_API_KEY
   delete env.COMMANDCODE_E2E_PROVIDER_API_KEY
 

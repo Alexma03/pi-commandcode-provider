@@ -215,8 +215,8 @@ const env = {
   PI_CODING_AGENT_DIR: agentDir,
   PI_CODING_AGENT_SESSION_DIR: join(tempHome, "sessions"),
   COMMANDCODE_API_BASE: `${apiBase}/provider/v1`,
-  COMMANDCODE_API_KEY: "mock-key",
-  COMMANDCODE_ZDR: "1",
+  COMMAND_CODE_API_KEY: "mock-key",
+  CMD_ZDR: "1",
   COMMANDCODE_MODELS_URL: `${apiBase}/provider/v1/models`,
 }
 
