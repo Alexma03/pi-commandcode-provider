@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Stream incremental tool-call arguments from the `/alpha/generate` transport instead of waiting for the final complete tool-call event.
 - Add a daily GitHub Actions synchronization job that opens or updates a pull request for CLI version, image capability, reasoning, effort, and output-limit changes in the latest published Command Code catalog.
 - Refresh static model capabilities from `command-code@1.32.2`, separating reasoning support from selectable effort levels and honoring model-specific output limits.
 - Reject truncated, aborted, and network-failed generate streams instead of reporting partial responses as successful.

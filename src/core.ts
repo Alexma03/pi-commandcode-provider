@@ -288,6 +288,10 @@ export function createStreamCommandCode(deps: CoreDependencies) {
       let textBlock: TextContent | undefined
       let currentTextIdx = -1
       let thinkingIdx = -1
+      const streamingToolCalls = new Map<
+        string,
+        { contentIndex: number; toolCall: ToolCallContent; partialArgs: string }
+      >()
       let finished = false
 
       const abortUpstream = () => {
@@ -400,25 +404,81 @@ export function createStreamCommandCode(deps: CoreDependencies) {
             break
           }
 
+          case "tool-input-start": {
+            endTextBlock()
+            endThinking()
+            const id = stringValue(event.id)
+            if (!id || streamingToolCalls.has(id)) break
+
+            const toolCall: ToolCallContent = {
+              type: "toolCall",
+              id,
+              name: stringValue(event.toolName) ?? "",
+              arguments: {},
+            }
+            output.content.push(toolCall)
+            const contentIndex = output.content.length - 1
+            streamingToolCalls.set(id, { contentIndex, toolCall, partialArgs: "" })
+            stream.push({
+              type: "toolcall_start",
+              contentIndex,
+              partial: output,
+            })
+            break
+          }
+
+          case "tool-input-delta": {
+            const id = stringValue(event.id)
+            const delta = stringValue(event.delta)
+            if (!id || delta === undefined) break
+            const active = streamingToolCalls.get(id)
+            if (!active) break
+
+            active.partialArgs += delta
+            active.toolCall.arguments = recordOrEmpty(active.partialArgs)
+            stream.push({
+              type: "toolcall_delta",
+              contentIndex: active.contentIndex,
+              delta,
+              partial: output,
+            })
+            break
+          }
+
+          case "tool-input-end": {
+            break
+          }
+
           case "tool-call": {
             endTextBlock()
             endThinking()
-            const toolCall: ToolCallContent = {
+            const id = stringValue(event.toolCallId) ?? ""
+            const active = streamingToolCalls.get(id)
+            const toolCall: ToolCallContent = active?.toolCall ?? {
               type: "toolCall",
-              id: stringValue(event.toolCallId) ?? "",
+              id,
               name: stringValue(event.toolName) ?? "",
-              arguments: recordOrEmpty(event.input ?? event.args ?? event.arguments),
+              arguments: {},
             }
-            output.content.push(toolCall)
-            const idx = output.content.length - 1
-            stream.push({
-              type: "toolcall_start",
-              contentIndex: idx,
-              partial: output,
-            })
+            toolCall.name = stringValue(event.toolName) ?? toolCall.name
+            toolCall.arguments = recordOrEmpty(event.input ?? event.args ?? event.arguments)
+
+            let contentIndex: number
+            if (active) {
+              contentIndex = active.contentIndex
+              streamingToolCalls.delete(id)
+            } else {
+              output.content.push(toolCall)
+              contentIndex = output.content.length - 1
+              stream.push({
+                type: "toolcall_start",
+                contentIndex,
+                partial: output,
+              })
+            }
             stream.push({
               type: "toolcall_end",
-              contentIndex: idx,
+              contentIndex,
               toolCall,
               partial: output,
             })

@@ -175,6 +175,12 @@ export type AssistantMessageEvent =
       partial: AssistantMessageLike
     }
   | {
+      type: "toolcall_delta"
+      contentIndex: number
+      delta: string
+      partial: AssistantMessageLike
+    }
+  | {
       type: "toolcall_end"
       contentIndex: number
       toolCall: ToolCallContent

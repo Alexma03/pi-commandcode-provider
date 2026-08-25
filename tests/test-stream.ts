@@ -425,6 +425,104 @@ describe("streamCommandCode — successful streams", () => {
     assert.equal(toolCall?.type === "toolCall" ? toolCall.name : "", "read_file")
   })
 
+  it("streams incremental tool-call arguments from generate events", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [
+        JSON.stringify({
+          type: "tool-input-start",
+          id: "call_1",
+          toolName: "read_file",
+        }),
+        JSON.stringify({ type: "tool-input-delta", id: "call_1", delta: '{"path":"' }),
+        JSON.stringify({ type: "tool-input-delta", id: "call_1", delta: '/tmp/x"}' }),
+        JSON.stringify({ type: "tool-input-end", id: "call_1" }),
+        JSON.stringify({
+          type: "tool-call",
+          toolCallId: "call_1",
+          toolName: "read_file",
+          input: { path: "/tmp/x" },
+        }),
+        JSON.stringify({ type: "finish", finishReason: "tool-calls" }),
+      ],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), { apiKey: "mock-key" }),
+    )
+
+    assert.deepEqual(eventTypes(events), [
+      "start",
+      "toolcall_start",
+      "toolcall_delta",
+      "toolcall_delta",
+      "toolcall_end",
+      "done",
+    ])
+    const deltas = events.flatMap((event) => (event.type === "toolcall_delta" ? [event.delta] : []))
+    assert.deepEqual(deltas, ['{"path":"', '/tmp/x"}'])
+
+    const done = events.at(-1)
+    if (done?.type !== "done") throw new Error("expected done")
+    assert.equal(done.reason, "toolUse")
+    const toolCall = done.message.content[0]
+    assert.equal(toolCall?.type, "toolCall")
+    if (toolCall?.type !== "toolCall") throw new Error("expected tool call")
+    assert.equal(toolCall.id, "call_1")
+    assert.equal(toolCall.name, "read_file")
+    assert.deepEqual(toolCall.arguments, { path: "/tmp/x" })
+  })
+
+  it("keeps concurrent incremental tool calls separate", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [
+        JSON.stringify({ type: "tool-input-start", id: "call_1", toolName: "read_file" }),
+        JSON.stringify({ type: "tool-input-start", id: "call_2", toolName: "read_file" }),
+        JSON.stringify({ type: "tool-input-delta", id: "call_1", delta: '{"path":"/a"}' }),
+        JSON.stringify({ type: "tool-input-delta", id: "call_2", delta: '{"path":"/b"}' }),
+        JSON.stringify({
+          type: "tool-call",
+          toolCallId: "call_2",
+          toolName: "read_file",
+          input: { path: "/b" },
+        }),
+        JSON.stringify({
+          type: "tool-call",
+          toolCallId: "call_1",
+          toolName: "read_file",
+          input: { path: "/a" },
+        }),
+        JSON.stringify({ type: "finish", finishReason: "tool-calls" }),
+      ],
+    })
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), { apiKey: "mock-key" }),
+    )
+
+    const starts = events.flatMap((event) =>
+      event.type === "toolcall_start" ? [event.contentIndex] : [],
+    )
+    const deltas = events.flatMap((event) =>
+      event.type === "toolcall_delta" ? [[event.contentIndex, event.delta] as const] : [],
+    )
+    const ends = events.flatMap((event) =>
+      event.type === "toolcall_end" ? [[event.contentIndex, event.toolCall.id] as const] : [],
+    )
+    assert.deepEqual(starts, [0, 1])
+    assert.deepEqual(deltas, [
+      [0, '{"path":"/a"}'],
+      [1, '{"path":"/b"}'],
+    ])
+    assert.deepEqual(ends, [
+      [1, "call_2"],
+      [0, "call_1"],
+    ])
+  })
+
   it("flushes reasoning if finish arrives without reasoning-end", async () => {
     server.mockResponse({
       type: "success",
