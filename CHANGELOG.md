@@ -10,6 +10,7 @@
 - Add optional zero-data-retention headers through `COMMANDCODE_ZDR=1`.
 - Refresh GPT-5.6 Terra and Luna display prices after their temporary 50% promotion ended, and display the current DeepSeek V4 off-peak rates for its time-dependent pricing.
 - Add isolated live E2E profiles for separate Go-plan and Provider-API credentials, including an explicit selected-transport assertion and packed-package validation.
+- Fix extension load failure on newer pi hosts that reject registering a custom API under a built-in name (`openai-completions`); register under `commandcode-custom` instead and restore the real wire API before native compat dispatch.
 
 ## 0.5.1 - 2026-08-11
 

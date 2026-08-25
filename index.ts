@@ -19,6 +19,7 @@ import { getConfiguredApiKey } from "./src/api-key.ts"
 import { createStreamCommandCode } from "./src/core.ts"
 import { calculateCommandCodeCost } from "./src/cost.ts"
 import {
+  apiForModelId,
   baseUrlForModel,
   DEFAULT_MODELS_URL,
   DEFAULT_PROVIDER_API_BASE,
@@ -51,7 +52,7 @@ function createProviderConfig(
     name: "Command Code",
     baseUrl: apiBase,
     apiKey: getConfiguredApiKey() ?? "$COMMANDCODE_API_KEY",
-    api: "openai-completions",
+    api: "commandcode-custom",
     streamSimple: streamCommandCode,
     headers,
     oauth: {
@@ -63,7 +64,7 @@ function createProviderConfig(
     models: models.map((model) => ({
       id: model.id,
       name: model.name,
-      api: model.api,
+      api: "commandcode-custom",
       baseUrl: baseUrlForModel(apiBase, model.api),
       reasoning: model.reasoning,
       ...(thinkingMetadataForModel(model.id) ?? {}),
@@ -108,7 +109,12 @@ export default async function (pi: ExtensionAPI) {
   })
   const transport = createCommandCodeTransportRouter({
     createStream: () => new AssistantMessageEventStream(),
-    streamProvider: streamNativeProvider,
+    streamProvider: (model, context, options) =>
+      streamNativeProvider(
+        { ...model, api: apiForModelId(model.id), compat: model.compatConfig ?? model.compat },
+        context,
+        options,
+      ),
     streamGenerate,
   })
 
