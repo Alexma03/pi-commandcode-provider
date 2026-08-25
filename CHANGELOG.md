@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add a daily GitHub Actions check that compares static image and reasoning metadata with the latest published Command Code CLI catalog.
+- Add a daily GitHub Actions synchronization job that opens or updates a pull request for CLI version, image capability, and reasoning-effort changes in the latest published Command Code catalog.
 - Refresh static model capabilities from `command-code@1.32.2`, including new image and reasoning metadata.
 - Add `/commandcode-quota` with live credits, plan, usage totals, and rolling-limit diagnostics from Command Code's alpha usage endpoints.
 - Add `zai-org/GLM-5.3` with its verified reasoning efforts and display pricing.
