@@ -2,15 +2,21 @@
 
 ## Unreleased
 
-- Add a daily GitHub Actions synchronization job that opens or updates a pull request for CLI version, image capability, and reasoning-effort changes in the latest published Command Code catalog.
-- Refresh static model capabilities from `command-code@1.32.2`, including new image and reasoning metadata.
+- Add a daily GitHub Actions synchronization job that opens or updates a pull request for CLI version, image capability, reasoning, effort, and output-limit changes in the latest published Command Code catalog.
+- Refresh static model capabilities from `command-code@1.32.2`, separating reasoning support from selectable effort levels and honoring model-specific output limits.
+- Reject truncated, aborted, and network-failed generate streams instead of reporting partial responses as successful.
+- Normalize malformed tool results and synthesize missing tool results so follow-up requests preserve valid tool-call history.
+- Refresh display pricing for all 58 current models, including Gemini 3.7 Flash, Qwen 3.8 27B, Ox Alpha, Muse Spark 1.2, and Grok 4.6 long-context rates.
+- Accept the official `COMMAND_CODE_API_KEY` and `CMD_ZDR` environment variables while retaining legacy aliases.
+- Align generate request metadata with the CLI by forwarding stable session IDs, optional temperature, and the CLI user agent.
+- Validate manually pasted API keys, use the CLI's two-minute browser timeout, and reject OAuth state mismatches without closing the callback server.
 - Add `/commandcode-quota` with live credits, plan, usage totals, and rolling-limit diagnostics from Command Code's alpha usage endpoints.
 - Add `zai-org/GLM-5.3` with its verified reasoning efforts and display pricing.
 - Prefer Command Code's Provider API (`/provider/v1/chat/completions` and `/provider/v1/messages`) and automatically fall back to the existing `/alpha/generate` transport only when the Provider API returns `403 upgrade_required` for a Go-plan account.
 - Remember the detected transport for the running process, re-detect it when credentials change, prevent stale in-flight requests from overwriting the new credential's transport, and never fall back for unrelated authentication, permission, rate-limit, network, or server failures.
 - Use Pi's native OpenAI- and Anthropic-compatible providers for Provider API streaming, including adaptive thinking for current reasoning-capable Claude models, while preserving the existing hardened generate transport, dynamic model discovery, offline cache, refresh/status commands, pricing, and OAuth credentials.
 - Let `/login` use browser authentication, an explicit API-key prompt, or a directly pasted API key.
-- Add optional zero-data-retention headers through `COMMANDCODE_ZDR=1`.
+- Add optional zero-data-retention headers through `CMD_ZDR=1` and the legacy `COMMANDCODE_ZDR=1` alias.
 - Refresh GPT-5.6 Terra and Luna display prices after their temporary 50% promotion ended, and display the current DeepSeek V4 off-peak rates for its time-dependent pricing.
 - Add isolated live E2E profiles for separate Go-plan and Provider-API credentials, including an explicit selected-transport assertion and packed-package validation.
 - Fix extension load failure on newer pi hosts that reject registering a custom API under a built-in name (`openai-completions`); register under `commandcode-custom` instead and restore the real wire API before native compat dispatch.
