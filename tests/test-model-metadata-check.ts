@@ -8,6 +8,9 @@ import {
   parseKnownTextOnlyModelIds,
   parseModelsReference,
   parsePackageVersion,
+  renderCommandCodeCatalog,
+  updateChangelogCatalogVersion,
+  updateReadmeCatalogVersion,
   type CommandCodeModelMetadata,
 } from "../.github/scripts/check-commandcode-model-metadata.ts"
 
@@ -68,6 +71,7 @@ describe("Command Code model metadata checker", () => {
     const diff = diffModelMetadata(current, upstream)
 
     assert.deepEqual(diff, {
+      versionChanged: false,
       addedImageModelIds: ["added-image"],
       removedImageModelIds: ["removed-image"],
       addedReasoningModelIds: ["added-reasoning"],
@@ -75,6 +79,63 @@ describe("Command Code model metadata checker", () => {
       changedReasoningModelIds: ["changed-reasoning"],
     })
     assert.equal(hasModelMetadataDiff(diff), true)
+  })
+
+  it("reports CLI version drift even when model metadata is unchanged", () => {
+    const metadata: CommandCodeModelMetadata = {
+      imageModelIds: ["vision-model"],
+      reasoningEfforts: { "vision-model": ["low"] },
+    }
+
+    const diff = diffModelMetadata(metadata, metadata, "1.32.2", "1.33.0")
+
+    assert.equal(diff.versionChanged, true)
+    assert.equal(hasModelMetadataDiff(diff), true)
+  })
+
+  it("renders a deterministic generated catalog and updates the README version", () => {
+    assert.equal(
+      renderCommandCodeCatalog("1.33.0", {
+        imageModelIds: ["b-model", "a-model"],
+        reasoningEfforts: {
+          "b-model": ["high", "max"],
+          "a-model": ["low"],
+        },
+      }),
+      `export const COMMAND_CODE_CLI_VERSION = "1.33.0"
+
+export type CommandCodeInputType = "text" | "image"
+export type CommandCodeReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+
+/**
+ * Generated from command-code@1.33.0 by \`npm run sync:commandcode-catalog\`.
+ * Do not edit manually.
+ */
+export const MODEL_INPUT_MODALITIES: Readonly<Record<string, readonly CommandCodeInputType[]>> = {
+  "a-model": ["text", "image"],
+  "b-model": ["text", "image"],
+}
+
+export const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {
+  "a-model": ["low"],
+  "b-model": ["high", "max"],
+}
+`,
+    )
+    assert.equal(
+      updateReadmeCatalogVersion(
+        "The capability snapshot currently follows `command-code@1.32.2`.",
+        "1.33.0",
+      ),
+      "The capability snapshot currently follows `command-code@1.33.0`.",
+    )
+    assert.equal(
+      updateChangelogCatalogVersion(
+        "- Refresh capabilities from `command-code@1.32.2`, including metadata.",
+        "1.33.0",
+      ),
+      "- Refresh capabilities from `command-code@1.33.0`, including metadata.",
+    )
   })
 
   it("rejects unexpected upstream structures instead of silently passing", () => {

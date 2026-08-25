@@ -1,18 +1,24 @@
 import { execFile } from "node:child_process"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { promisify } from "node:util"
 
-import { COMMAND_CODE_CLI_VERSION } from "../../src/core.ts"
-import { MODEL_EFFORTS, MODEL_INPUT_MODALITIES } from "../../src/models.ts"
+import {
+  COMMAND_CODE_CLI_VERSION,
+  MODEL_EFFORTS,
+  MODEL_INPUT_MODALITIES,
+} from "../../src/commandcode-catalog.ts"
 
 const execFileAsync = promisify(execFile)
 const MODELS_REFERENCE_PATH = "dist/bundled/command-code-knowledge/reference/models.md"
 const CLI_BUNDLE_PATH = "dist/cli.mjs"
 const TEXT_ONLY_MARKER = ',__name(isKnownTextOnlyModel,"isKnownTextOnlyModel")'
-const VALID_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"])
+const VALID_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"])
+const CATALOG_SOURCE_PATH = new URL("../../src/commandcode-catalog.ts", import.meta.url)
+const README_PATH = new URL("../../README.md", import.meta.url)
+const CHANGELOG_PATH = new URL("../../CHANGELOG.md", import.meta.url)
 
 export interface CommandCodeModelMetadata {
   imageModelIds: readonly string[]
@@ -20,6 +26,7 @@ export interface CommandCodeModelMetadata {
 }
 
 export interface ModelMetadataDiff {
+  versionChanged: boolean
   addedImageModelIds: readonly string[]
   removedImageModelIds: readonly string[]
   addedReasoningModelIds: readonly string[]
@@ -144,6 +151,8 @@ export function currentModelMetadata(): CommandCodeModelMetadata {
 export function diffModelMetadata(
   current: CommandCodeModelMetadata,
   upstream: CommandCodeModelMetadata,
+  currentVersion = COMMAND_CODE_CLI_VERSION,
+  upstreamVersion = COMMAND_CODE_CLI_VERSION,
 ): ModelMetadataDiff {
   const currentImages = new Set(current.imageModelIds)
   const upstreamImages = new Set(upstream.imageModelIds)
@@ -153,6 +162,7 @@ export function diffModelMetadata(
   const upstreamReasoningSet = new Set(upstreamReasoningIds)
 
   return {
+    versionChanged: currentVersion !== upstreamVersion,
     addedImageModelIds: sorted(
       upstream.imageModelIds.filter((modelId) => !currentImages.has(modelId)),
     ),
@@ -177,7 +187,10 @@ export function diffModelMetadata(
 }
 
 export function hasModelMetadataDiff(diff: ModelMetadataDiff): boolean {
-  return Object.values(diff).some((modelIds) => modelIds.length > 0)
+  return (
+    diff.versionChanged ||
+    Object.entries(diff).some(([key, modelIds]) => key !== "versionChanged" && modelIds.length > 0)
+  )
 }
 
 function formatList(modelIds: readonly string[]): string {
@@ -200,6 +213,66 @@ function formatReasoningChanges(
     .join("<br>")
 }
 
+function quoted(value: string): string {
+  return JSON.stringify(value)
+}
+
+function recordEntries(
+  values: Readonly<Record<string, readonly string[]>>,
+): readonly [string, readonly string[]][] {
+  return Object.entries(values).sort(([left], [right]) => left.localeCompare(right))
+}
+
+export function renderCommandCodeCatalog(
+  packageVersion: string,
+  metadata: CommandCodeModelMetadata,
+): string {
+  const imageEntries = sorted(metadata.imageModelIds)
+    .map((modelId) => `  ${quoted(modelId)}: ["text", "image"],`)
+    .join("\n")
+  const reasoningEntries = recordEntries(metadata.reasoningEfforts)
+    .map(
+      ([modelId, efforts]) =>
+        `  ${quoted(modelId)}: [${efforts.map((effort) => quoted(effort)).join(", ")}],`,
+    )
+    .join("\n")
+
+  return `export const COMMAND_CODE_CLI_VERSION = ${quoted(packageVersion)}\n\nexport type CommandCodeInputType = "text" | "image"\nexport type CommandCodeReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max"\n\n/**\n * Generated from command-code@${packageVersion} by \`npm run sync:commandcode-catalog\`.\n * Do not edit manually.\n */\nexport const MODEL_INPUT_MODALITIES: Readonly<Record<string, readonly CommandCodeInputType[]>> = {\n${imageEntries}\n}\n\nexport const MODEL_EFFORTS: Readonly<Record<string, readonly CommandCodeReasoningEffort[]>> = {\n${reasoningEntries}\n}\n`
+}
+
+function updateDocumentedCatalogVersion(
+  contents: string,
+  packageVersion: string,
+  context: string,
+): string {
+  const pattern = /command-code@\d+\.\d+\.\d+(?:[-+][^`\s,]+)?/
+  if (!pattern.test(contents)) throw new Error(`Could not find the ${context} catalog version`)
+  return contents.replace(pattern, `command-code@${packageVersion}`)
+}
+
+export function updateReadmeCatalogVersion(readme: string, packageVersion: string): string {
+  return updateDocumentedCatalogVersion(readme, packageVersion, "README")
+}
+
+export function updateChangelogCatalogVersion(changelog: string, packageVersion: string): string {
+  return updateDocumentedCatalogVersion(changelog, packageVersion, "changelog")
+}
+
+async function writeSynchronizedCatalog(
+  packageVersion: string,
+  metadata: CommandCodeModelMetadata,
+): Promise<void> {
+  const [readme, changelog] = await Promise.all([
+    readFile(README_PATH, "utf-8"),
+    readFile(CHANGELOG_PATH, "utf-8"),
+  ])
+  await Promise.all([
+    writeFile(CATALOG_SOURCE_PATH, renderCommandCodeCatalog(packageVersion, metadata), "utf-8"),
+    writeFile(README_PATH, updateReadmeCatalogVersion(readme, packageVersion), "utf-8"),
+    writeFile(CHANGELOG_PATH, updateChangelogCatalogVersion(changelog, packageVersion), "utf-8"),
+  ])
+}
+
 function metadataReport(
   packageVersion: string,
   current: CommandCodeModelMetadata,
@@ -219,6 +292,7 @@ function metadataReport(
     "",
     "| Change | Models |",
     "| --- | --- |",
+    `| CLI version | ${diff.versionChanged ? `\`${COMMAND_CODE_CLI_VERSION}\` → \`${packageVersion}\`` : "Current"} |`,
     `| New image support | ${formatList(diff.addedImageModelIds)} |`,
     `| Removed image support | ${formatList(diff.removedImageModelIds)} |`,
     `| New reasoning metadata | ${formatList(diff.addedReasoningModelIds)} |`,
@@ -289,10 +363,17 @@ async function inspectPackedPackage(packageSpec: string): Promise<{
 }
 
 async function main(): Promise<void> {
-  const packageSpec = process.argv[2] ?? "command-code@latest"
+  const write = process.argv.includes("--write")
+  const packageSpec =
+    process.argv.find((argument) => argument.startsWith("command-code@")) ?? "command-code@latest"
   const current = currentModelMetadata()
   const upstreamPackage = await inspectPackedPackage(packageSpec)
-  const diff = diffModelMetadata(current, upstreamPackage.metadata)
+  const diff = diffModelMetadata(
+    current,
+    upstreamPackage.metadata,
+    COMMAND_CODE_CLI_VERSION,
+    upstreamPackage.packageVersion,
+  )
   const report = metadataReport(
     upstreamPackage.packageVersion,
     current,
@@ -301,6 +382,12 @@ async function main(): Promise<void> {
   )
 
   console.log(report)
+
+  if (write) {
+    await writeSynchronizedCatalog(upstreamPackage.packageVersion, upstreamPackage.metadata)
+    console.log(`Synchronized static metadata with command-code@${upstreamPackage.packageVersion}.`)
+    return
+  }
 
   if (hasModelMetadataDiff(diff)) {
     throw new Error(
