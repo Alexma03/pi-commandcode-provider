@@ -32,6 +32,7 @@ import {
 import { getApiKey as getOAuthApiKey, login, refreshToken } from "./src/oauth.ts"
 import { normalizeCommandCodeMessage } from "./src/overflow.ts"
 import { MODEL_COSTS, ZERO_MODEL_COST } from "./src/pricing.ts"
+import { registerCommandCodeQuota } from "./src/quota-command.ts"
 import { createCommandCodeRuntime } from "./src/runtime.ts"
 import { createCommandCodeTransportRouter } from "./src/transport.ts"
 
@@ -122,6 +123,11 @@ export default async function (pi: ExtensionAPI) {
     if (event.message.role !== "assistant") return
     const normalized = normalizeCommandCodeMessage(event.message, ctx.model?.provider)
     return normalized ? { message: normalized.message } : undefined
+  })
+
+  registerCommandCodeQuota(pi, {
+    apiBase: legacyApiBase(apiBase),
+    headers: commandCodeHeaders(),
   })
 
   const runtime = createCommandCodeRuntime<ProviderConfig, ExtensionCommandContext>(pi, {
