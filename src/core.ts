@@ -709,12 +709,6 @@ export function createStreamCommandCode(deps: CoreDependencies) {
               throw streamError
             }
 
-            if (!finished) {
-              throw new Error(
-                "Stream ended unexpectedly before completion (no finish event) — response was truncated",
-              )
-            }
-
             // Stream completed successfully.
             endTextBlock()
             endThinking()
