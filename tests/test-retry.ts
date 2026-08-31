@@ -10,6 +10,7 @@ import type { AssistantMessageEvent } from "../src/core.ts"
 import {
   collectEvents,
   createTestDeps,
+  createTestEventStream,
   makeContext,
   makeModel,
   startMockCommandCodeServer,
@@ -35,6 +36,227 @@ beforeEach(() => {
 function eventTypes(events: readonly AssistantMessageEvent[]): string[] {
   return events.map((event) => event.type)
 }
+
+async function within<T>(promise: Promise<T>, milliseconds = 1_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("operation did not complete within its bound")),
+          milliseconds,
+        )
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+describe("streamCommandCode — structured terminal failure capture", () => {
+  it("calls onTerminalFailure exactly once before the terminal error with full HTTP metadata", async () => {
+    server.mockResponse({
+      type: "error",
+      status: 429,
+      body: JSON.stringify({ error: { code: "rate_limit", type: "temporary_failure" } }),
+      headers: { "retry-after": "3" },
+    })
+
+    let hookCalls = 0
+    let hookFailure: unknown
+    let hookWasBeforeError = true
+    const { streamCommandCode } = createTestDeps({
+      apiBase: server.baseUrl(),
+      createStream: () => {
+        const inner = createTestEventStream()
+        return {
+          push(event: AssistantMessageEvent) {
+            if (event.type === "error" && hookCalls === 0) hookWasBeforeError = false
+            inner.push(event)
+          },
+          end() {
+            inner.end()
+          },
+          [Symbol.asyncIterator]() {
+            return inner[Symbol.asyncIterator]()
+          },
+        }
+      },
+    })
+
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), {
+        apiKey: TEST_API_KEY,
+        maxRetries: 0,
+        onTerminalFailure: (failure) => {
+          hookCalls += 1
+          hookFailure = failure
+        },
+      }),
+    )
+
+    assert.equal(server.requestCount(), 1)
+    assert.equal(hookCalls, 1)
+    assert.equal(hookWasBeforeError, true)
+    assert.deepEqual(hookFailure, {
+      source: "generate",
+      phase: "response",
+      kind: "http",
+      status: 429,
+      retryAfterMs: 3_000,
+      providerCode: "rate_limit",
+      providerType: "temporary_failure",
+    })
+    assert.equal(events.at(-1)?.type, "error")
+  })
+
+  it("captures the original network error class without formatting it into the failure", async () => {
+    const socketFailure = new TypeError("socket closed")
+    let observed: unknown
+    const { streamCommandCode } = createTestDeps({
+      fetchImpl: async () => {
+        throw socketFailure
+      },
+    })
+
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), {
+        apiKey: TEST_API_KEY,
+        onTerminalFailure: (failure) => {
+          observed = failure
+        },
+      }),
+    )
+
+    assert.deepEqual(observed, {
+      source: "generate",
+      phase: "request",
+      kind: "network",
+    })
+    const error = events.at(-1)
+    assert.equal(error?.type, "error")
+    if (error?.type !== "error") throw new Error("expected error")
+    assert.equal(error.error.errorMessage, socketFailure.message)
+  })
+
+  it("does not await cancellation of an oversized cloned metadata body", async () => {
+    let observed: unknown
+    const oversized = new Uint8Array(64 * 1024 + 1)
+    const { streamCommandCode } = createTestDeps({
+      fetchImpl: async () => new Response(oversized, { status: 500 }),
+    })
+
+    const events = await within(
+      collectEvents(
+        streamCommandCode(makeModel(), makeContext(), {
+          apiKey: TEST_API_KEY,
+          forceMaxRetriesZero: true,
+          onTerminalFailure: (failure) => {
+            observed = failure
+          },
+        }),
+      ),
+    )
+
+    assert.deepEqual(observed, {
+      source: "generate",
+      phase: "response",
+      kind: "http",
+      status: 500,
+    })
+    assert.equal(events.at(-1)?.type, "error")
+  })
+
+  it("bounds stalled metadata capture independently of the response body", async () => {
+    let observed: unknown
+    const { streamCommandCode } = createTestDeps({
+      fetchImpl: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull: () => new Promise<void>(() => {}),
+          }),
+          { status: 500 },
+        ),
+    })
+
+    const events = await within(
+      collectEvents(
+        streamCommandCode(makeModel(), makeContext(), {
+          apiKey: TEST_API_KEY,
+          forceMaxRetriesZero: true,
+          timeoutMs: 20,
+          onTerminalFailure: (failure) => {
+            observed = failure
+          },
+        }),
+      ),
+    )
+
+    assert.deepEqual(observed, {
+      source: "generate",
+      phase: "response",
+      kind: "abort",
+      abortOrigin: "runtime-timeout",
+    })
+    assert.equal(events.at(-1)?.type, "error")
+  })
+
+  it("records an understood upstream stream reason before terminal capture", async () => {
+    server.mockResponse({
+      type: "success",
+      events: [
+        JSON.stringify({
+          type: "finish",
+          finishReason: "stop",
+          rawFinishReason: "upstream_error",
+        }),
+      ],
+    })
+    let observed: unknown
+    const { streamCommandCode } = createTestDeps({
+      apiBase: server.baseUrl(),
+    })
+
+    await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), {
+        apiKey: TEST_API_KEY,
+        onTerminalFailure: (failure) => {
+          observed = failure
+        },
+      }),
+    )
+
+    assert.deepEqual(observed, {
+      source: "generate",
+      phase: "stream",
+      kind: "stream",
+      streamReason: "upstream-connection",
+    })
+  })
+
+  it("records a truncated stream reason before terminal capture", async () => {
+    server.mockResponse({ type: "success", events: [] })
+    let observed: unknown
+    const { streamCommandCode } = createTestDeps({ apiBase: server.baseUrl() })
+
+    await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), {
+        apiKey: TEST_API_KEY,
+        onTerminalFailure: (failure) => {
+          observed = failure
+        },
+      }),
+    )
+
+    assert.deepEqual(observed, {
+      source: "generate",
+      phase: "stream",
+      kind: "stream",
+      streamReason: "truncated",
+    })
+  })
+})
 
 describe("streamCommandCode — retry on transient errors", () => {
   it("retries on 429 and succeeds on the second attempt", async () => {
@@ -117,6 +339,51 @@ describe("streamCommandCode — retry on transient errors", () => {
     const last503 = events.at(-1)
     if (last503?.type !== "error") throw new Error("expected error")
     assert.match(last503.error.errorMessage ?? "", /503/)
+  })
+})
+
+describe("streamCommandCode — forced coordinator attempt budget", () => {
+  it("skips retry delay and cap rewriting when the coordinator forces zero retries", async () => {
+    server.mockResponse({
+      type: "error",
+      status: 429,
+      body: "rate limited",
+      headers: { "retry-after": "3600" },
+    })
+    let delayCalls = 0
+    let observed: unknown
+    const { streamCommandCode } = createTestDeps({
+      apiBase: server.baseUrl(),
+      delay: async () => {
+        delayCalls += 1
+      },
+    })
+
+    const events = await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), {
+        apiKey: TEST_API_KEY,
+        maxRetries: 4,
+        maxRetryDelayMs: 10,
+        forceMaxRetriesZero: true,
+        onTerminalFailure: (failure) => {
+          observed = failure
+        },
+      }),
+    )
+
+    assert.equal(server.requestCount(), 1)
+    assert.equal(delayCalls, 0)
+    assert.deepEqual(observed, {
+      source: "generate",
+      phase: "response",
+      kind: "http",
+      status: 429,
+      retryAfterMs: 3_600_000,
+    })
+    const error = events.at(-1)
+    assert.equal(error?.type, "error")
+    if (error?.type !== "error") throw new Error("expected error")
+    assert.doesNotMatch(error.error.errorMessage ?? "", /exceeds max/)
   })
 })
 
@@ -355,6 +622,38 @@ describe("streamCommandCode — abort cancels retry loop", () => {
     const error = events.at(-1)
     if (error?.type !== "error") throw new Error("expected error")
     assert.equal(error.reason, "aborted")
+  })
+
+  it("reports caller cancellation instead of the failed retry attempt", async () => {
+    server.mockResponse({ type: "error", status: 500, body: "error" })
+    const controller = new AbortController()
+    let observed: unknown
+    const { streamCommandCode } = createTestDeps({
+      apiBase: server.baseUrl(),
+      delay: async (_ms: number, signal: AbortSignal) => {
+        controller.abort()
+        if (!signal.aborted) throw new Error("expected caller signal to abort the delay")
+        throw new DOMException("Aborted", "AbortError")
+      },
+    })
+
+    await collectEvents(
+      streamCommandCode(makeModel(), makeContext(), {
+        apiKey: TEST_API_KEY,
+        signal: controller.signal,
+        maxRetries: 1,
+        onTerminalFailure: (failure) => {
+          observed = failure
+        },
+      }),
+    )
+
+    assert.deepEqual(observed, {
+      source: "generate",
+      phase: "request",
+      kind: "abort",
+      abortOrigin: "caller",
+    })
   })
 })
 

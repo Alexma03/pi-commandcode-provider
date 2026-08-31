@@ -1,0 +1,85 @@
+schema: spec-driven
+
+context: |
+  Project: pi-commandcode-provider, a TypeScript ESM Pi extension/provider for the
+  Command Code API. The repository is a personal fork of patlux/pi-commandcode-provider
+  (Alexma03/pi-commandcode-provider) on feat/multi-account-failover.
+
+  Architecture: index.ts is the Pi provider entry point; src/ contains authentication,
+  OAuth, model discovery and caching, transport, request conversion, quota, runtime,
+  pricing, and shared types; tests/ contains TypeScript unit tests and Node.js Pi/OMP
+  integration and smoke tests. The package uses NodeNext TypeScript with strict
+  checking, explicit .ts imports, npm scripts, tsx, Node.js ESM, and Prettier.
+
+  Current SDD scope: initialize OpenSpec project context only. Do not create a change
+  proposal or implement the later feature during initialization. The later product goal
+  is support for multiple separately authorized Command Code GOAT accounts with bounded
+  automatic failover and recovery for quota exhaustion and selected provider or
+  connectivity failures.
+
+  Security boundary: API keys, OAuth credentials, auth files, and other credential
+  values are external inputs and MUST NOT be stored in OpenSpec artifacts.
+
+strict_tdd: true
+
+rules:
+  proposal:
+    require_problem_statement: true
+    require_scope_and_non_goals: true
+  spec:
+    require_acceptance_criteria: true
+    scenario_format: Given/When/Then
+    normative_language: RFC 2119 keywords where requirements are normative
+  design:
+    require_tradeoffs: true
+    document_failover_and_recovery_boundaries: true
+  tasks:
+    protect_review_workload: true
+    require_exact_allowed_edit_surfaces: true
+    keep_tasks_small_enough_for_one_session: true
+  apply:
+    preserve_dirty_worktree: true
+    no_out_of_scope_mutations: true
+    strict_tdd_sequence: RED, GREEN, TRIANGULATE, REFACTOR
+    test_command: "npm test"
+  verify:
+    test_command: "npm test"
+    compare_implementation_against_every_spec_scenario: true
+    format_command: "npm run format:check"
+  archive:
+    warn_before_destructive_deltas: true
+
+testing:
+  strict_tdd: true
+  detected: "2026-08-29"
+  runner:
+    command: "npm test"
+    framework: "TypeScript tests via tsx plus Node.js ESM Pi/OMP smoke tests; tsc --noEmit runs first"
+  layers:
+    unit: "npm run test:unit"
+    integration: "Node.js Pi/OMP compatibility and isolated, local, and authenticated test scripts"
+    e2e: "Optional live profile scripts using external credential files"
+  commands:
+    all:
+      scope: "."
+      command: "npm test"
+      framework: "npm script combining typecheck, TypeScript tests, and Node.js integration tests"
+    unit:
+      scope: "src/ and tests/"
+      command: "npm run test:unit"
+      framework: "tsx"
+  coverage:
+    command: ""
+    commands: []
+
+quality:
+  lint: "not configured"
+  lint_commands: []
+  typecheck: "TypeScript strict typecheck"
+  typecheck_commands:
+    - scope: "."
+      command: "npm run typecheck"
+  format: "Prettier"
+  format_commands:
+    - scope: "."
+      command: "npm run format:check"

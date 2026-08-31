@@ -2,6 +2,20 @@ export type StopReason = "stop" | "length" | "toolUse"
 export type ErrorReason = "error" | "aborted"
 export type TerminalReason = StopReason | ErrorReason
 
+export type AbortOrigin = "caller" | "runtime-timeout" | "runtime-abort"
+
+export type TransportFailure = {
+  source: "generate" | "native"
+  phase: "payload" | "request" | "response" | "stream"
+  kind: "http" | "network" | "abort" | "stream" | "unknown"
+  status?: number
+  retryAfterMs?: number
+  providerCode?: string
+  providerType?: string
+  streamReason?: "upstream-connection" | "truncated"
+  abortOrigin?: AbortOrigin
+}
+
 export interface UsageCost {
   input: number
   output: number
@@ -135,6 +149,16 @@ export interface StreamOptions {
    * Set to 0 to disable the cap.
    */
   maxRetryDelayMs?: number
+  /**
+   * Internal coordinator hook for one terminal transport attempt. The hook is
+   * invoked before the terminal error event and never performs routing itself.
+   */
+  onTerminalFailure?: (failure: TransportFailure) => void | Promise<void>
+  /**
+   * Internal pool-attempt marker. When set, this invocation owns one account
+   * attempt and lower-level retry delay/cap handling is disabled.
+   */
+  forceMaxRetriesZero?: boolean
 }
 
 export type AssistantMessageEvent =
