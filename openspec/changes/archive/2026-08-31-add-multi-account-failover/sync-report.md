@@ -14,10 +14,10 @@ Status: **PASS**
 
 ## Domains synced
 
-| Domain | Source | Canonical | Operation | Integrity |
-| --- | --- | --- | --- | --- |
-| account-management | `openspec/changes/add-multi-account-failover/specs/account-management/spec.md` | `openspec/specs/account-management/spec.md` | full copy | `cmp` pass |
-| failover-runtime | `openspec/changes/add-multi-account-failover/specs/failover-runtime/spec.md` | `openspec/specs/failover-runtime/spec.md` | full copy | `cmp` pass |
+| Domain               | Source                                                                           | Canonical                                     | Operation | Integrity  |
+| -------------------- | -------------------------------------------------------------------------------- | --------------------------------------------- | --------- | ---------- |
+| account-management   | `openspec/changes/add-multi-account-failover/specs/account-management/spec.md`   | `openspec/specs/account-management/spec.md`   | full copy | `cmp` pass |
+| failover-runtime     | `openspec/changes/add-multi-account-failover/specs/failover-runtime/spec.md`     | `openspec/specs/failover-runtime/spec.md`     | full copy | `cmp` pass |
 | process-coordination | `openspec/changes/add-multi-account-failover/specs/process-coordination/spec.md` | `openspec/specs/process-coordination/spec.md` | full copy | `cmp` pass |
 
 ## Content operations
