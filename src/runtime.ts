@@ -1,3 +1,9 @@
+import {
+  createFailoverStream,
+  type FailoverStreamDependencies,
+  type FailoverStreamFactory,
+} from "./failover.ts"
+import type { AccountMode, AccountService, AccountStatusView } from "./accounts.ts"
 import type { CommandCodeModel, LoadCommandCodeModelsResult } from "./models.ts"
 
 export interface CommandCodeUi {
@@ -29,6 +35,8 @@ export interface CommandCodeRuntimeOptions<TProviderConfig> {
   loadModels: () => Promise<LoadCommandCodeModelsResult>
   createProviderConfig: (models: readonly CommandCodeModel[]) => TProviderConfig
   getTransport?: () => "unknown" | "provider" | "generate"
+  accountService?: Pick<AccountService, "mode" | "listStatus" | "shutdown">
+  getCoordinationWarning?: () => string | undefined
   now?: () => number
   logWarning?: (message: string) => void
 }
@@ -42,6 +50,8 @@ export interface CommandCodeRuntimeStatus {
   cachePath: string
   endpoint: string
   warning?: string
+  accountSummary?: string
+  coordinationWarning?: string
   refreshing: boolean
 }
 
@@ -82,6 +92,16 @@ export function redactEndpoint(value: string): string {
   return redactUrl(value)
 }
 
+export function formatAccountSummary(accounts: readonly AccountStatusView[]): string {
+  const counts = new Map<AccountStatusView["health"], number>()
+  for (const account of accounts) counts.set(account.health, (counts.get(account.health) ?? 0) + 1)
+  const health = (["healthy", "cooling", "probe-due", "probing"] as const)
+    .filter((state) => (counts.get(state) ?? 0) > 0)
+    .map((state) => `${state}: ${counts.get(state)}`)
+    .join(", ")
+  return `account summary: ${accounts.length} configured${health ? `; ${health}` : ""}; active markers are process-local`
+}
+
 function formatTimestamp(timestamp: number | undefined): string {
   return timestamp === undefined ? "never" : new Date(timestamp).toISOString()
 }
@@ -98,6 +118,10 @@ export function formatCommandCodeStatus(status: CommandCodeRuntimeStatus): strin
     `refresh: ${status.refreshing ? "in progress" : "idle"}`,
   ]
 
+  if (status.accountSummary) lines.push(redactDiagnosticText(status.accountSummary))
+  if (status.coordinationWarning) {
+    lines.push(`coordination warning: ${redactDiagnosticText(status.coordinationWarning)}`)
+  }
   lines.push(`warning: ${status.warning ? redactDiagnosticText(status.warning) : "none"}`)
   return lines.join("\n")
 }
@@ -108,6 +132,8 @@ export class CommandCodeRuntime<TProviderConfig, TContext extends CommandCodeCom
   private status: CommandCodeRuntimeStatus
   private providerRegistered = false
   private refreshPromise: Promise<CommandCodeRefreshResult> | undefined
+  private shutDown = false
+  private shutdownPromise: Promise<void> | undefined
 
   constructor(
     private readonly pi: CommandCodeRuntimeApi<TProviderConfig, TContext>,
@@ -130,6 +156,41 @@ export class CommandCodeRuntime<TProviderConfig, TContext extends CommandCodeCom
     return {
       ...this.status,
       transport: this.options.getTransport?.() ?? "unknown",
+    }
+  }
+
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise
+    this.shutDown = true
+    this.shutdownPromise = Promise.resolve(this.options.accountService?.shutdown()).then(() => {})
+    return this.shutdownPromise
+  }
+
+  private async refreshAccountStatus(): Promise<void> {
+    const accountService = this.options.accountService
+    if (!accountService) return
+
+    let accountSummary: string
+    try {
+      const mode: AccountMode = await accountService.mode()
+      if (mode.kind === "legacy") {
+        accountSummary = "account summary: legacy (no configured pool)"
+      } else if (mode.kind === "unavailable") {
+        accountSummary = "account summary: unavailable"
+      } else {
+        accountSummary = formatAccountSummary(await accountService.listStatus())
+      }
+    } catch {
+      accountSummary = "account summary: unavailable"
+    }
+
+    const coordinationWarning = this.options.getCoordinationWarning?.()
+    this.status = {
+      ...this.status,
+      accountSummary,
+      ...(coordinationWarning
+        ? { coordinationWarning: redactDiagnosticText(coordinationWarning) }
+        : { coordinationWarning: undefined }),
     }
   }
 
@@ -266,11 +327,22 @@ export class CommandCodeRuntime<TProviderConfig, TContext extends CommandCodeCom
     this.pi.registerCommand("commandcode-status", {
       description: "Show redacted Command Code provider diagnostics",
       handler: async (_args, ctx) => {
+        await this.refreshAccountStatus()
         const status = this.getStatus()
-        ctx.ui.notify(formatCommandCodeStatus(status), status.warning ? "warning" : "info")
+        const warning =
+          status.warning ||
+          status.coordinationWarning ||
+          status.accountSummary?.includes("unavailable")
+        ctx.ui.notify(formatCommandCodeStatus(status), warning ? "warning" : "info")
       },
     })
   }
+}
+
+export function createAccountAwareStream(
+  dependencies: FailoverStreamDependencies,
+): FailoverStreamFactory {
+  return createFailoverStream(dependencies)
 }
 
 export function createCommandCodeRuntime<
