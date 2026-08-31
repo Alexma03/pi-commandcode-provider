@@ -15,6 +15,7 @@
 
 import { randomBytes } from "node:crypto"
 import { startAuthServer } from "./auth-server.ts"
+import { commandCodeIdentityFromWhoami } from "./quota.ts"
 
 const STUDIO_BASE_URL = "https://commandcode.ai"
 const TEN_YEARS_MS = 10 * 365 * 24 * 60 * 60 * 1000 // API keys don't expire
@@ -30,6 +31,17 @@ export interface OAuthCredentials {
   refresh: string
   access: string
   expires: number
+}
+
+export interface AcquiredCommandCodeAccount {
+  readonly apiKey: string
+  readonly login: string
+  readonly keyName?: string
+}
+
+export interface AccountAcquisitionOptions {
+  readonly fetchImpl?: typeof fetch
+  readonly apiBase?: string
 }
 
 class AuthTimeoutError extends Error {
@@ -120,10 +132,54 @@ export async function validateApiKey(
   }
 }
 
-async function promptForApiKey(callbacks: OAuthLoginCallbacks, message: string) {
+export async function acquireCommandCodeAccount(
+  callbacks: OAuthLoginCallbacks,
+  options: AccountAcquisitionOptions = {},
+): Promise<AcquiredCommandCodeAccount> {
+  const choice = await chooseLoginFlow(callbacks)
+  let apiKey: string
+  if (choice.type === "apiKey") {
+    apiKey = choice.apiKey
+  } else if (choice.type === "prompt") {
+    apiKey = sanitizeApiKey(
+      await callbacks.onPrompt({ message: "Paste your Command Code API key:" }),
+    )
+  } else {
+    apiKey = getApiKey(await browserLogin(callbacks, options))
+  }
+  if (!apiKey) throw new Error("No Command Code API key provided")
+
+  let response: Response
+  try {
+    response = await (options.fetchImpl ?? fetch)(
+      `${options.apiBase ?? DEFAULT_API_BASE}/alpha/whoami`,
+      { headers: { Authorization: `Bearer ${apiKey}` } },
+    )
+  } catch {
+    throw new Error("Could not validate the Command Code account")
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new Error("Invalid Command Code account credential")
+  }
+  if (!response.ok) throw new Error("Could not validate the Command Code account")
+
+  const identity = commandCodeIdentityFromWhoami(await response.json().catch(() => null))
+  if (!identity) throw new Error("Command Code returned an unrecognized account identity")
+  return {
+    apiKey,
+    login: identity.login,
+    ...(identity.keyName ? { keyName: identity.keyName } : {}),
+  }
+}
+
+async function promptForApiKey(
+  callbacks: OAuthLoginCallbacks,
+  message: string,
+  options: AccountAcquisitionOptions = {},
+) {
   const apiKey = sanitizeApiKey(await callbacks.onPrompt({ message }))
   if (!apiKey) throw new Error("No Command Code API key provided")
-  await validateApiKey(apiKey)
+  await validateApiKey(apiKey, options)
   return credentialsFromApiKey(apiKey)
 }
 
@@ -155,7 +211,10 @@ async function chooseLoginFlow(callbacks: OAuthLoginCallbacks): Promise<LoginCho
   return { type: "apiKey", apiKey: input }
 }
 
-async function browserLogin(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
+async function browserLogin(
+  callbacks: OAuthLoginCallbacks,
+  options: AccountAcquisitionOptions = {},
+): Promise<OAuthCredentials> {
   const stateToken = generateStateToken()
   let authServer
   try {
@@ -164,6 +223,7 @@ async function browserLogin(callbacks: OAuthLoginCallbacks): Promise<OAuthCreden
     return promptForApiKey(
       callbacks,
       "Could not start browser auth. Paste your Command Code API key:",
+      options,
     )
   }
 
@@ -185,6 +245,7 @@ async function browserLogin(callbacks: OAuthLoginCallbacks): Promise<OAuthCreden
       return promptForApiKey(
         callbacks,
         "Automatic transfer failed or timed out. Paste your Command Code API key:",
+        options,
       )
     }
     throw error

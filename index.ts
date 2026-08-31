@@ -15,6 +15,9 @@ import {
 } from "@earendil-works/pi-coding-agent"
 import { join } from "node:path"
 
+import { registerCommandCodeAccountCommands } from "./src/account-commands.ts"
+import { createAccountStore } from "./src/account-store.ts"
+import { createAccountService } from "./src/accounts.ts"
 import { getConfiguredApiKey } from "./src/api-key.ts"
 import { createStreamCommandCode } from "./src/core.ts"
 import { calculateCommandCodeCost } from "./src/cost.ts"
@@ -109,7 +112,7 @@ export default async function (pi: ExtensionAPI) {
     calculateCost: calculateCommandCodeCost,
     apiBase: legacyApiBase(apiBase),
   })
-  const transport = createCommandCodeTransportRouter({
+  const transportDependencies = {
     createStream: () => new AssistantMessageEventStream(),
     streamProvider: (model, context, options) =>
       streamNativeProvider(
@@ -118,13 +121,18 @@ export default async function (pi: ExtensionAPI) {
         options,
       ),
     streamGenerate,
-  })
+  }
+  const transport = createCommandCodeTransportRouter(transportDependencies)
+  const accountStore = createAccountStore({ getAgentDir })
+  const accountService = createAccountService({ store: accountStore })
 
   pi.on("message_end", async (event, ctx) => {
     if (event.message.role !== "assistant") return
     const normalized = normalizeCommandCodeMessage(event.message, ctx.model?.provider)
     return normalized ? { message: normalized.message } : undefined
   })
+
+  registerCommandCodeAccountCommands(pi, { service: accountService })
 
   registerCommandCodeQuota(pi, {
     apiBase: legacyApiBase(apiBase),
