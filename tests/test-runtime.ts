@@ -7,6 +7,7 @@ import {
   type CommandCodeRuntimeApi,
 } from "../src/runtime.ts"
 import type { CommandCodeModel, LoadCommandCodeModelsResult } from "../src/models.ts"
+import type { AccountService, AccountStatusView } from "../src/accounts.ts"
 
 type ProviderConfig = {
   models: readonly CommandCodeModel[]
@@ -125,6 +126,99 @@ describe("Command Code runtime", () => {
     assert.match(statusMessage, /endpoint: https:\/\/api\.commandcode\.ai\/provider\/v1\/models/)
     assert.doesNotMatch(statusMessage, /token=user_secret_value/)
     assert.doesNotMatch(statusMessage, /user_secret_value/)
+  })
+
+  it("appends a redacted pool summary and coordination warning to status", async () => {
+    const pi = new ExtensionAPITestDouble()
+    const context = new CommandContext()
+    let shutdowns = 0
+    const accountRows: readonly AccountStatusView[] = [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        label: "primary",
+        order: 1,
+        primary: true,
+        active: true,
+        health: "healthy",
+      },
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        label: "fallback",
+        order: 2,
+        primary: false,
+        active: false,
+        health: "cooling",
+        retryAfter: 2_000,
+        quotaSnapshotAge: 4_000,
+      },
+    ]
+    const accounts = {
+      mode: async () => ({ kind: "pool" as const, revision: 3 }),
+      listStatus: async () => accountRows,
+      shutdown: async () => {
+        shutdowns += 1
+      },
+    } satisfies Pick<AccountService, "mode" | "listStatus" | "shutdown">
+    const runtime = createCommandCodeRuntime(pi, {
+      endpoint: "https://api.commandcode.ai/provider/v1/models",
+      cachePath: "/tmp/commandcode-models.json",
+      loadModels: async () => loaded([FIRST_MODEL]),
+      createProviderConfig: (models) => ({ models }),
+      accountService: accounts,
+      getCoordinationWarning: () => "shared coordination is unavailable",
+    })
+
+    await runtime.initialize()
+    const statusCommand = pi.commands.get("commandcode-status")
+    assert.ok(statusCommand)
+    await statusCommand("", context)
+    const message = context.notifications.at(-1)?.message ?? ""
+    assert.match(message, /account summary: 2 configured/)
+    assert.match(message, /active markers are process-local/)
+    assert.match(message, /coordination warning: shared coordination is unavailable/)
+    assert.doesNotMatch(message, /11111111|22222222|fallback/)
+
+    await runtime.shutdown()
+    assert.equal(shutdowns, 1)
+  })
+
+  it("reports legacy and unavailable account modes without exposing unavailable details", async () => {
+    const pi = new ExtensionAPITestDouble()
+    const context = new CommandContext()
+    let mode: "legacy" | "unavailable" = "legacy"
+    const accounts = {
+      mode: async () =>
+        mode === "legacy"
+          ? ({ kind: "legacy" as const } satisfies { kind: "legacy" })
+          : ({
+              kind: "unavailable" as const,
+              message: "private account state unavailable",
+            } satisfies {
+              kind: "unavailable"
+              message: string
+            }),
+      listStatus: async () => [],
+      shutdown: async () => {},
+    } satisfies Pick<AccountService, "mode" | "listStatus" | "shutdown">
+    const runtime = createCommandCodeRuntime(pi, {
+      endpoint: "https://api.commandcode.ai/provider/v1/models",
+      cachePath: "/tmp/commandcode-models.json",
+      loadModels: async () => loaded([FIRST_MODEL]),
+      createProviderConfig: (models) => ({ models }),
+      accountService: accounts,
+    })
+
+    await runtime.initialize()
+    const statusCommand = pi.commands.get("commandcode-status")
+    assert.ok(statusCommand)
+    await statusCommand("", context)
+    assert.match(context.notifications.at(-1)?.message ?? "", /account summary: legacy/)
+
+    mode = "unavailable"
+    await statusCommand("", context)
+    const unavailable = context.notifications.at(-1)?.message ?? ""
+    assert.match(unavailable, /account summary: unavailable/)
+    assert.doesNotMatch(unavailable, /private account state unavailable/)
   })
 
   it("coalesces overlapping refreshes and preserves the current catalog on failure", async () => {
