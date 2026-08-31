@@ -34,6 +34,7 @@ import type {
   StopReason,
   StreamOptions,
   TerminalReason,
+  TransportFailure,
   TextContent,
   ToolCallContent,
   Usage,
@@ -62,6 +63,113 @@ function parseRetryAfterSeconds(value: string | null): number | undefined {
   const date = Date.parse(value)
   if (!Number.isNaN(date)) return Math.max(0, (date - Date.now()) / 1000)
   return undefined
+}
+
+function retryAfterMs(value: string | null): number | undefined {
+  const seconds = parseRetryAfterSeconds(value)
+  if (seconds === undefined) return undefined
+  const milliseconds = seconds * 1000
+  return Number.isSafeInteger(milliseconds) ? milliseconds : undefined
+}
+
+const MAX_MACHINE_FIELD_LENGTH = 128
+
+function machineField(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_MACHINE_FIELD_LENGTH) {
+    return undefined
+  }
+  if (
+    Array.from(value).some((character) => {
+      const code = character.charCodeAt(0)
+      return code <= 31 || code === 127
+    })
+  ) {
+    return undefined
+  }
+  return value
+}
+
+function machineFields(value: unknown): Pick<TransportFailure, "providerCode" | "providerType"> {
+  if (!isRecord(value)) return {}
+  const nested = isRecord(value.error) ? value.error : undefined
+  const code = machineField(nested?.code ?? value.code)
+  const type = machineField(nested?.type ?? value.type)
+  return {
+    ...(code ? { providerCode: code } : {}),
+    ...(type ? { providerType: type } : {}),
+  }
+}
+
+const MAX_MACHINE_BODY_BYTES = 64 * 1024
+const MACHINE_BODY_READ_TIMEOUT_MS = 100
+
+function readBeforeDeadline(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  deadline: number,
+): Promise<ReadableStreamReadResult<Uint8Array> | undefined> {
+  const remaining = deadline - Date.now()
+  if (remaining <= 0) return Promise.resolve(undefined)
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      settled = true
+      resolve(undefined)
+    }, remaining)
+    void reader.read().then(
+      (result) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(result)
+      },
+      (error: unknown) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+async function machineFieldsFromResponse(
+  response: Response,
+): Promise<Pick<TransportFailure, "providerCode" | "providerType">> {
+  try {
+    const reader = response.clone().body?.getReader()
+    if (!reader) return {}
+    let bytes = 0
+    let text = ""
+    const decoder = new TextDecoder()
+    const deadline = Date.now() + MACHINE_BODY_READ_TIMEOUT_MS
+    try {
+      for (;;) {
+        const result = await readBeforeDeadline(reader, deadline)
+        if (!result) {
+          void reader.cancel().catch(() => {})
+          return {}
+        }
+        const { done, value } = result
+        if (done) break
+        bytes += value.byteLength
+        if (bytes > MAX_MACHINE_BODY_BYTES) {
+          void reader.cancel().catch(() => {})
+          return {}
+        }
+        text += decoder.decode(value, { stream: true })
+      }
+      text += decoder.decode()
+    } finally {
+      try {
+        reader.releaseLock()
+      } catch {
+        // The cloned body may already be closed.
+      }
+    }
+    return text ? machineFields(JSON.parse(text)) : {}
+  } catch {
+    return {}
+  }
 }
 
 function effectiveMaxRetryDelayMs(value: number | undefined): number {
@@ -207,11 +315,13 @@ export function createStreamCommandCode(deps: CoreDependencies) {
     promise: Promise<T>,
     controller: AbortController,
     timeoutMs: number | undefined,
+    onTimeout?: () => void,
   ): Promise<T> {
     if (timeoutMs === undefined) return raceAbort(promise, controller.signal)
 
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
+        onTimeout?.()
         controller.abort()
         reject(timeoutError(timeoutMs))
       }, timeoutMs)
@@ -234,6 +344,20 @@ export function createStreamCommandCode(deps: CoreDependencies) {
     options?: StreamOptions,
   ): AssistantMessageEventStreamLike {
     const stream = deps.createStream()
+    let capturedFailure: TransportFailure | undefined
+    let terminalFailureNotified = false
+    let callerAbortObserved = Boolean(options?.signal?.aborted)
+
+    const notifyTerminalFailure = async (failure: TransportFailure): Promise<void> => {
+      if (terminalFailureNotified) return
+      terminalFailureNotified = true
+      capturedFailure = failure
+      try {
+        await options?.onTerminalFailure?.(failure)
+      } catch {
+        // A diagnostic hook must not change the provider's terminal behavior.
+      }
+    }
 
     async function run() {
       // Some hosts pass a literal env-var reference instead of resolving it.
@@ -267,6 +391,7 @@ export function createStreamCommandCode(deps: CoreDependencies) {
             "No Command Code API key. Run /login and select Command Code, set COMMAND_CODE_API_KEY (or legacy COMMANDCODE_API_KEY), or configure ~/.commandcode/auth.json, ~/.pi/agent/auth.json or ~/.omp/agent/auth.json",
           timestamp: now(),
         }
+        await notifyTerminalFailure({ source: "generate", phase: "request", kind: "unknown" })
         stream.push({ type: "error", reason: "error", error: msg })
         stream.end()
         return
@@ -294,6 +419,38 @@ export function createStreamCommandCode(deps: CoreDependencies) {
       >()
       let finished = false
 
+      const captureAbortFailure = (
+        phase: TransportFailure["phase"],
+        runtimeOrigin?: "runtime-timeout" | "runtime-abort",
+      ): void => {
+        capturedFailure = {
+          source: "generate",
+          phase,
+          kind: "abort",
+          abortOrigin:
+            callerAbortObserved || options?.signal?.aborted
+              ? "caller"
+              : (runtimeOrigin ?? "caller"),
+        }
+      }
+
+      const waitForRetry = async (waitMs: number): Promise<void> => {
+        try {
+          await delay(waitMs, controller.signal)
+        } catch (error: unknown) {
+          if (
+            callerAbortObserved ||
+            controller.signal.aborted ||
+            (error instanceof Error && error.name === "AbortError")
+          ) {
+            captureAbortFailure("request")
+          } else {
+            capturedFailure = { source: "generate", phase: "request", kind: "unknown" }
+          }
+          throw error
+        }
+      }
+
       const abortUpstream = () => {
         if (!controller.signal.aborted) controller.abort()
         try {
@@ -302,11 +459,16 @@ export function createStreamCommandCode(deps: CoreDependencies) {
           // Reader cancellation is best-effort.
         }
       }
+      const onCallerAbort = () => {
+        callerAbortObserved = true
+        abortUpstream()
+      }
 
       if (options?.signal?.aborted) {
+        callerAbortObserved = true
         abortUpstream()
       } else {
-        options?.signal?.addEventListener("abort", abortUpstream, {
+        options?.signal?.addEventListener("abort", onCallerAbort, {
           once: true,
         })
       }
@@ -491,6 +653,12 @@ export function createStreamCommandCode(deps: CoreDependencies) {
               rawFinishReason &&
               /^(?:network|connection|upstream)[-_\s]?error$/i.test(rawFinishReason)
             ) {
+              capturedFailure = {
+                source: "generate",
+                phase: "stream",
+                kind: "stream",
+                streamReason: "upstream-connection",
+              }
               throw new Error(
                 `Provider finished with reason "${rawFinishReason}" — upstream connection failed mid-stream`,
               )
@@ -519,6 +687,7 @@ export function createStreamCommandCode(deps: CoreDependencies) {
           }
 
           case "abort": {
+            captureAbortFailure("stream")
             throw abortError("Request aborted")
           }
 
@@ -527,6 +696,12 @@ export function createStreamCommandCode(deps: CoreDependencies) {
               commandCodeErrorMessage(event.error) ??
               commandCodeErrorMessage(event.message) ??
               "Stream error"
+            capturedFailure = {
+              source: "generate",
+              phase: "stream",
+              kind: "stream",
+              ...machineFields(event.error ?? event.message),
+            }
             output.stopReason = "error"
             output.errorMessage = message
             throw new Error(message)
@@ -536,7 +711,10 @@ export function createStreamCommandCode(deps: CoreDependencies) {
 
       try {
         stream.push({ type: "start", partial: output })
-        if (controller.signal.aborted) throw abortError("Aborted")
+        if (controller.signal.aborted) {
+          captureAbortFailure("request")
+          throw abortError("Aborted")
+        }
 
         const workingDir = cwd()
         const threadId = options?.sessionId
@@ -581,19 +759,35 @@ export function createStreamCommandCode(deps: CoreDependencies) {
         const payloadController = new AbortController()
         const onPayloadAbort = () => payloadController.abort()
         controller.signal.addEventListener("abort", onPayloadAbort, { once: true })
+        let payloadTimedOut = false
         let nextBody: unknown
         try {
           nextBody = await raceAbortWithTimeout(
             Promise.resolve(options?.onPayload?.(body, model)),
             payloadController,
             timeoutMs,
+            () => {
+              payloadTimedOut = true
+            },
           )
+        } catch (error: unknown) {
+          if (callerAbortObserved || controller.signal.aborted) {
+            captureAbortFailure("payload")
+          } else if (payloadTimedOut) {
+            captureAbortFailure("payload", "runtime-timeout")
+          } else if (error instanceof Error && error.name === "AbortError") {
+            captureAbortFailure("payload")
+          } else {
+            capturedFailure = { source: "generate", phase: "payload", kind: "unknown" }
+          }
+          throw error
         } finally {
           controller.signal.removeEventListener("abort", onPayloadAbort)
         }
         if (nextBody !== undefined) body = nextBody
 
-        const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES
+        const forceMaxRetriesZero = options?.forceMaxRetriesZero === true
+        const maxRetries = forceMaxRetriesZero ? 0 : (options?.maxRetries ?? DEFAULT_MAX_RETRIES)
         const maxRetryDelayMs = effectiveMaxRetryDelayMs(options?.maxRetryDelayMs)
         const requestHeaders = {
           "Content-Type": "application/json",
@@ -610,6 +804,7 @@ export function createStreamCommandCode(deps: CoreDependencies) {
 
         let response!: Response
         retryLoop: for (let attempt = 0; ; attempt++) {
+          capturedFailure = undefined
           const attemptController = new AbortController()
           let attemptTimedOut = false
           let attemptTimeoutId: ReturnType<typeof setTimeout> | undefined
@@ -644,28 +839,63 @@ export function createStreamCommandCode(deps: CoreDependencies) {
                 signal: attemptController.signal,
               })
             } catch (fetchError: unknown) {
-              if (controller.signal.aborted) throw abortError("Aborted")
+              if (callerAbortObserved || controller.signal.aborted) {
+                captureAbortFailure("request")
+                throw abortError("Aborted")
+              }
               if (attemptTimedOut) {
+                captureAbortFailure("request", "runtime-timeout")
                 if (attempt < maxRetries) continue retryLoop
                 throw timeoutError(timeoutMs)
               }
+              if (
+                attemptController.signal.aborted ||
+                (fetchError instanceof Error && fetchError.name === "AbortError")
+              ) {
+                captureAbortFailure(
+                  "request",
+                  attemptController.signal.aborted ? "runtime-abort" : undefined,
+                )
+                throw fetchError
+              }
+              capturedFailure = { source: "generate", phase: "request", kind: "network" }
               throw fetchError
+            }
+
+            if (!response.ok) {
+              capturedFailure = {
+                source: "generate",
+                phase: "response",
+                kind: "http",
+                status: response.status,
+                ...(retryAfterMs(response.headers.get("retry-after")) !== undefined
+                  ? { retryAfterMs: retryAfterMs(response.headers.get("retry-after")) }
+                  : {}),
+                ...(await machineFieldsFromResponse(response)),
+              }
             }
 
             // --- HTTP-level retry ---
             if (!response.ok && isRetryableStatus(response.status)) {
               const retryAfter = response.headers.get("retry-after")
-              const waitMs = retryDelayMs(attempt, retryAfter, maxRetryDelayMs)
-              if (waitMs < 0) {
-                const requestedSeconds = parseRetryAfterSeconds(retryAfter) ?? 0
-                const capLabel =
-                  maxRetryDelayMs === Number.POSITIVE_INFINITY ? "disabled" : `${maxRetryDelayMs}ms`
-                throw new Error(`Retry-After delay ${requestedSeconds}s exceeds max ${capLabel}`)
-              }
-              if (attempt < maxRetries) {
-                await response.text().catch(() => "")
-                if (waitMs > 0) await delay(waitMs, controller.signal)
-                continue retryLoop
+              if (forceMaxRetriesZero) {
+                // The coordinator owns the account-attempt budget. In this mode
+                // do not calculate a retry delay or manufacture a cap error.
+              } else {
+                const waitMs = retryDelayMs(attempt, retryAfter, maxRetryDelayMs)
+                if (waitMs < 0) {
+                  const requestedSeconds = parseRetryAfterSeconds(retryAfter) ?? 0
+                  const capLabel =
+                    maxRetryDelayMs === Number.POSITIVE_INFINITY
+                      ? "disabled"
+                      : `${maxRetryDelayMs}ms`
+                  throw new Error(`Retry-After delay ${requestedSeconds}s exceeds max ${capLabel}`)
+                }
+                if (attempt < maxRetries) {
+                  await response.text().catch(() => "")
+                  if (waitMs > 0) await waitForRetry(waitMs)
+                  continue retryLoop
+                }
               }
             }
 
@@ -682,12 +912,43 @@ export function createStreamCommandCode(deps: CoreDependencies) {
                 ),
               )
             } catch (error: unknown) {
-              if (attemptTimedOut && attempt < maxRetries) continue retryLoop
+              if (callerAbortObserved || controller.signal.aborted) {
+                captureAbortFailure("response")
+              } else if (attemptTimedOut) {
+                captureAbortFailure("response", "runtime-timeout")
+                if (attempt < maxRetries) continue retryLoop
+              } else if (error instanceof Error && error.name === "AbortError") {
+                captureAbortFailure("response")
+              } else {
+                capturedFailure = { source: "generate", phase: "response", kind: "unknown" }
+              }
               throw error
             }
 
             if (!response.ok) {
-              const errBody = await raceAttempt(response.text().catch(() => ""))
+              let errBody: string
+              try {
+                errBody = await raceAttempt(response.text())
+              } catch (bodyError: unknown) {
+                if (callerAbortObserved || controller.signal.aborted) {
+                  captureAbortFailure("response")
+                } else if (attemptTimedOut) {
+                  captureAbortFailure("response", "runtime-timeout")
+                } else if (bodyError instanceof Error && bodyError.name === "AbortError") {
+                  captureAbortFailure("response")
+                } else {
+                  capturedFailure = {
+                    source: "generate",
+                    phase: "response",
+                    kind: "network",
+                    status: response.status,
+                    ...(retryAfterMs(response.headers.get("retry-after")) !== undefined
+                      ? { retryAfterMs: retryAfterMs(response.headers.get("retry-after")) }
+                      : {}),
+                  }
+                }
+                throw bodyError
+              }
               let errorDetail: string | undefined
               try {
                 const parsedBody: unknown = JSON.parse(errBody)
@@ -705,32 +966,73 @@ export function createStreamCommandCode(deps: CoreDependencies) {
 
             // --- Read response stream ---
             reader = response.body?.getReader()
-            if (!reader) throw new Error("No response body")
+            if (!reader) {
+              capturedFailure = { source: "generate", phase: "response", kind: "network" }
+              throw new Error("No response body")
+            }
 
             const decoder = new TextDecoder()
             let buffer = ""
 
             try {
               readLoop: for (;;) {
-                if (controller.signal.aborted) throw abortError("Aborted")
-                const { done, value } = await raceAbort(reader.read(), attemptController.signal)
+                if (controller.signal.aborted) {
+                  captureAbortFailure("stream")
+                  throw abortError("Aborted")
+                }
+                let readResult: ReadableStreamReadResult<Uint8Array>
+                try {
+                  readResult = await raceAbort(reader.read(), attemptController.signal)
+                } catch (readError: unknown) {
+                  if (callerAbortObserved || controller.signal.aborted) {
+                    captureAbortFailure("stream")
+                  } else if (attemptTimedOut) {
+                    captureAbortFailure("stream", "runtime-timeout")
+                  } else if (readError instanceof Error && readError.name === "AbortError") {
+                    captureAbortFailure(
+                      "stream",
+                      attemptController.signal.aborted ? "runtime-abort" : undefined,
+                    )
+                  } else {
+                    capturedFailure = {
+                      source: "generate",
+                      phase: "stream",
+                      kind: "network",
+                      streamReason: "upstream-connection",
+                    }
+                  }
+                  throw readError
+                }
+                const { done, value } = readResult
                 if (done) {
                   if (buffer.trim()) handleEvent(parseStreamEventLine(buffer))
                   if (!finished) {
+                    capturedFailure = {
+                      source: "generate",
+                      phase: "stream",
+                      kind: "stream",
+                      streamReason: "truncated",
+                    }
                     throw new Error(
                       "Stream ended unexpectedly before completion (no finish event) — response was truncated",
                     )
                   }
                   break
                 }
-                if (controller.signal.aborted) throw abortError("Aborted")
+                if (controller.signal.aborted) {
+                  captureAbortFailure("stream")
+                  throw abortError("Aborted")
+                }
 
                 buffer += decoder.decode(value, { stream: true })
                 const lines = buffer.split("\n")
                 buffer = lines.pop() ?? ""
 
                 for (const line of lines) {
-                  if (controller.signal.aborted) throw abortError("Aborted")
+                  if (controller.signal.aborted) {
+                    captureAbortFailure("stream")
+                    throw abortError("Aborted")
+                  }
                   handleEvent(parseStreamEventLine(line))
                   if (finished) break readLoop
                 }
@@ -744,10 +1046,17 @@ export function createStreamCommandCode(deps: CoreDependencies) {
               } catch {}
               reader = undefined
 
-              if (
-                controller.signal.aborted ||
-                (streamError instanceof Error && streamError.name === "AbortError")
-              ) {
+              if (callerAbortObserved || controller.signal.aborted) {
+                captureAbortFailure("stream")
+                throw streamError
+              }
+              if (attemptTimedOut) {
+                captureAbortFailure("stream", "runtime-timeout")
+              } else if (streamError instanceof Error && streamError.name === "AbortError") {
+                captureAbortFailure(
+                  "stream",
+                  attemptController.signal.aborted ? "runtime-abort" : undefined,
+                )
                 throw streamError
               }
 
@@ -762,7 +1071,7 @@ export function createStreamCommandCode(deps: CoreDependencies) {
                 output.errorMessage = undefined
                 finished = false
                 const waitMs = attemptTimedOut ? 0 : retryDelayMs(attempt, null, maxRetryDelayMs)
-                if (waitMs > 0) await delay(waitMs, controller.signal)
+                if (waitMs > 0) await waitForRetry(waitMs)
                 continue retryLoop
               }
               if (attemptTimedOut) throw timeoutError(timeoutMs)
@@ -786,6 +1095,16 @@ export function createStreamCommandCode(deps: CoreDependencies) {
           }
         }
       } catch (error: unknown) {
+        if (!capturedFailure) {
+          if (callerAbortObserved || controller.signal.aborted) {
+            captureAbortFailure("request")
+          } else {
+            capturedFailure = { source: "generate", phase: "request", kind: "unknown" }
+          }
+        }
+        await notifyTerminalFailure(
+          capturedFailure ?? { source: "generate", phase: "request", kind: "unknown" },
+        )
         const reason: ErrorReason =
           controller.signal.aborted || (error instanceof Error && error.name === "AbortError")
             ? "aborted"
@@ -798,7 +1117,7 @@ export function createStreamCommandCode(deps: CoreDependencies) {
         stream.push({ type: "error", reason, error: output })
         stream.end()
       } finally {
-        options?.signal?.removeEventListener("abort", abortUpstream)
+        options?.signal?.removeEventListener("abort", onCallerAbort)
         try {
           await reader?.cancel()
         } catch {
@@ -812,7 +1131,10 @@ export function createStreamCommandCode(deps: CoreDependencies) {
       }
     }
 
-    run().catch((error: unknown) => {
+    run().catch(async (error: unknown) => {
+      await notifyTerminalFailure(
+        capturedFailure ?? { source: "generate", phase: "request", kind: "unknown" },
+      )
       const msg: AssistantMessageLike = {
         role: "assistant",
         content: [],
