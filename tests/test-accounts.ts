@@ -1,14 +1,16 @@
 import assert from "node:assert/strict"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, it } from "node:test"
 
 import { createAccountStore } from "../src/account-store.ts"
+import { createCoordinationStore } from "../src/coordination.ts"
 import {
   createAccountService,
   type AccountHealthSnapshot,
   type AccountService,
+  type AccountProbeResult,
 } from "../src/accounts.ts"
 import type { TransportFailure } from "../src/types.ts"
 
@@ -209,5 +211,234 @@ describe("account planning and process-local health", () => {
       assert.equal(plans.length, 8)
       assert.ok(maximum > 1, "planning must not serialize concurrent requests")
     })
+  })
+
+  it("propagates cooldowns across services while keeping local health immediate", async () => {
+    const root = await mkdtemp(join(tmpdir(), "commandcode-coordination-service-"))
+    try {
+      const now = { value: 1_000_000 }
+      let nextId = 0
+      const store = createAccountStore({
+        stateDir: root,
+        now: () => now.value,
+        uuid: () => [ID_A, ID_B][nextId++] ?? "33333333-3333-4333-8333-333333333333",
+      })
+      const coordinationOne = createCoordinationStore({ stateDir: root, now: () => now.value })
+      const coordinationTwo = createCoordinationStore({ stateDir: root, now: () => now.value })
+      const first = createAccountService({
+        store,
+        coordination: coordinationOne,
+        now: () => now.value,
+      })
+      await first.add({ apiKey: KEY_A, keyName: "alpha", login: "alpha" })
+      await first.add({ apiKey: KEY_B, keyName: "bravo", login: "bravo" })
+      const second = createAccountService({
+        store: createAccountStore({ stateDir: root, now: () => now.value }),
+        coordination: coordinationTwo,
+        now: () => now.value,
+      })
+
+      const update = first.recordEligibleFailure(ID_A, failure({ status: 429 }))
+      assert.equal(first.getHealth(ID_A)?.health, "cooling")
+      await update
+      assert.deepEqual(
+        (await second.planLogicalRequest()).attempts.map((account) => account.id),
+        [ID_B],
+      )
+
+      now.value += 1
+      await second.recordEligibleFailure(ID_A, failure({ status: 429, retryAfterMs: 900_000 }))
+      const shared = await coordinationOne.load()
+      assert.equal(shared.kind, "loaded")
+      if (shared.kind !== "loaded") return
+      assert.equal(shared.snapshot.cooldowns[ID_A]?.epoch, 2)
+      assert.equal(shared.snapshot.cooldowns[ID_A]?.cooldownUntil, now.value + 900_000)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("schedules one non-blocking fenced probe and returns to a recovered account", async () => {
+    const root = await mkdtemp(join(tmpdir(), "commandcode-probe-service-"))
+    try {
+      const now = { value: 2_000_000 }
+      let nextId = 0
+      const store = createAccountStore({
+        stateDir: root,
+        now: () => now.value,
+        uuid: () => [ID_A, ID_B][nextId++] ?? "33333333-3333-4333-8333-333333333333",
+      })
+      const coordination = createCoordinationStore({ stateDir: root, now: () => now.value })
+      let probeStarted = 0
+      let releaseProbe: ((result: AccountProbeResult) => void) | undefined
+      let resolveProbeFinished: (() => void) | undefined
+      const probeResult = new Promise<AccountProbeResult>((resolve) => {
+        releaseProbe = resolve
+      })
+      const probeFinished = new Promise<void>((resolve) => {
+        resolveProbeFinished = resolve
+      })
+      const service = createAccountService({
+        store,
+        coordination,
+        now: () => now.value,
+        probeAccount: async (_account, probeOptions) => {
+          probeStarted += 1
+          assert.equal(probeOptions.timeoutMs, 15_000)
+          assert.equal(probeOptions.signal.aborted, false)
+          const result = await probeResult
+          resolveProbeFinished?.()
+          return result
+        },
+      })
+      await service.add({ apiKey: KEY_A, keyName: "alpha", login: "alpha" })
+      await service.add({ apiKey: KEY_B, keyName: "bravo", login: "bravo" })
+      await service.recordEligibleFailure(ID_A, failure({ status: 408 }))
+      now.value += 60_000
+
+      const plan = await service.planLogicalRequest()
+      assert.deepEqual(
+        plan.attempts.map((account) => account.id),
+        [ID_B],
+      )
+      for (let turn = 0; turn < 1_000 && probeStarted === 0; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      }
+      assert.equal(probeStarted, 1)
+      assert.equal(service.getHealth(ID_A)?.health, "probing")
+
+      const secondPlan = await service.planLogicalRequest()
+      assert.deepEqual(
+        secondPlan.attempts.map((account) => account.id),
+        [ID_B],
+      )
+      assert.equal(probeStarted, 1)
+
+      releaseProbe?.({ kind: "available" })
+      await probeFinished
+      let recovered: string[] = []
+      for (let turn = 0; turn < 1_000; turn += 1) {
+        recovered = (await service.planLogicalRequest()).attempts.map((account) => account.id)
+        if (recovered.includes(ID_A)) break
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      }
+      assert.deepEqual(recovered, [ID_A, ID_B])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("uses explicit quota refresh to recover a durable rate-limit cooldown", async () => {
+    const root = await mkdtemp(join(tmpdir(), "commandcode-quota-recovery-"))
+    try {
+      const now = { value: 3_000_000 }
+      const store = createAccountStore({ stateDir: root, now: () => now.value, uuid: () => ID_A })
+      const coordination = createCoordinationStore({ stateDir: root, now: () => now.value })
+      const first = createAccountService({ store, coordination, now: () => now.value })
+      await first.add({ apiKey: KEY_A, keyName: "alpha", login: "alpha" })
+      await first.recordEligibleFailure(ID_A, failure({ status: 429 }))
+      now.value += 5 * 60_000
+
+      const remaining = { value: 1 }
+      const second = createAccountService({
+        store: createAccountStore({ stateDir: root, now: () => now.value }),
+        coordination: createCoordinationStore({ stateDir: root, now: () => now.value }),
+        now: () => now.value,
+        fetchQuota: async () => ({
+          ok: true as const,
+          quota: {
+            account: { login: "alpha", orgId: null },
+            credits: {
+              monthlyCredits: 1,
+              purchasedCredits: 0,
+              freeCredits: 0,
+              remainingCredits: remaining.value,
+              windowLimits: [],
+            },
+            subscription: null,
+            summary: null,
+          },
+        }),
+      })
+      const refreshed = await second.refreshQuota(ID_A)
+      assert.equal(refreshed.ok, true)
+      assert.equal(second.getQuotaSnapshot(ID_A)?.quota.credits?.remainingCredits, 1)
+      assert.deepEqual(
+        (await second.planLogicalRequest()).attempts.map((account) => account.id),
+        [ID_A],
+      )
+      const shared = await coordination.load()
+      assert.equal(shared.kind, "loaded")
+      if (shared.kind === "loaded") assert.equal(shared.snapshot.cooldowns[ID_A], undefined)
+      assert.deepEqual(
+        (await first.planLogicalRequest()).attempts.map((account) => account.id),
+        [ID_A],
+        "a remote durable clear must clear matching local shared state",
+      )
+
+      remaining.value = 0
+      now.value += 1
+      await first.recordEligibleFailure(ID_A, failure({ status: 401 }))
+      now.value += 15 * 60_000
+      const authRefreshed = await second.refreshQuota(ID_A)
+      assert.equal(authRefreshed.ok, true)
+      if (authRefreshed.ok) assert.equal(authRefreshed.availability, "available")
+      const afterAuth = await coordination.load()
+      assert.equal(afterAuth.kind, "loaded")
+      if (afterAuth.kind === "loaded") assert.equal(afterAuth.snapshot.cooldowns[ID_A], undefined)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("degrades visibly to process-local cooldown when shared coordination is unsafe", async () => {
+    const root = await mkdtemp(join(tmpdir(), "commandcode-degraded-coordination-"))
+    try {
+      const warnings: string[] = []
+      const now = { value: 1_000_000 }
+      let probeCount = 0
+      let nextId = 0
+      const store = createAccountStore({
+        stateDir: root,
+        uuid: () => [ID_A, ID_B][nextId++] ?? "33333333-3333-4333-8333-333333333333",
+      })
+      const coordination = createCoordinationStore({
+        stateDir: root,
+        warning: (message) => warnings.push(message),
+      })
+      await store.addAccount({ label: "alpha", credential: { kind: "api-key", value: KEY_A } })
+      await store.addAccount({ label: "bravo", credential: { kind: "api-key", value: KEY_B } })
+      await symlink("/etc/passwd", coordination.coordinationPath)
+      const service = createAccountService({
+        store,
+        coordination,
+        now: () => now.value,
+        warning: (message) => warnings.push(message),
+        probeAccount: async () => {
+          probeCount += 1
+          return { kind: "available" }
+        },
+      })
+      await service.recordEligibleFailure(ID_A, failure({ status: 500 }))
+      assert.equal(service.getHealth(ID_A)?.health, "cooling")
+      assert.ok(warnings.length > 0)
+      assert.doesNotMatch(warnings.join("\n"), /cc_test_placeholder|Bearer|https?:|\/home\//i)
+
+      now.value += 60_000
+      assert.deepEqual(
+        (await service.planLogicalRequest()).attempts.map((account) => account.id),
+        [ID_B],
+      )
+      for (let turn = 0; turn < 1_000 && service.getHealth(ID_A); turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      }
+      assert.equal(probeCount, 1)
+      assert.deepEqual(
+        (await service.planLogicalRequest()).attempts.map((account) => account.id),
+        [ID_A, ID_B],
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
