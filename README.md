@@ -122,7 +122,24 @@ While pi is running, use these provider commands without restarting:
 - `/commandcode-status` shows redacted discovery diagnostics, including the source, model count, timestamps, cache path, endpoint, and warning.
 - `/commandcode-quota` shows your Command Code account usage and quota in a dashboard-style layout: credits remaining and used with a percentage, monthly/purchased/free sources, the current plan, available usage totals, the API key name, and the 5-hour and weekly usage windows.
 
-The `commandcode-quota` command reads from the Command Code alpha usage endpoints (the same ones the `cmd` CLI `/usage` command uses): `whoami`, `billing/credits`, `billing/subscriptions`, and `usage/summary`. It authenticates with the same API key the provider already uses. If the command cannot reach those endpoints or an endpoint schema changes, unavailable sections are reported explicitly instead of being displayed as zero usage. Output is plain text (via `ui.notify`) so it works across pi and compatible hosts such as OMP.
+The `commandcode-quota` command reads from the Command Code alpha usage endpoints (the same ones the `cmd` CLI `/usage` command uses): `whoami`, `billing/credits`, `billing/subscriptions`, and `usage/summary`. It authenticates with the same API key the provider already uses. If the command cannot reach those endpoints or an endpoint schema changes, unavailable sections are reported explicitly instead of being displayed as zero usage. Output is plain text (via `ui.notify`) so it works across pi and compatible hosts such as OMP. With multiple accounts configured, `/commandcode-quota` uses the primary account by default; pass a full account ID to inspect another account.
+
+### Multiple accounts and failover
+
+The extension-managed pool is optional. Use these commands to manage it:
+
+- `/commandcode-account-add` validates an interactively supplied account before storing it.
+- `/commandcode-accounts` lists opaque IDs, redacted labels, order, health, cooldown, active markers, and quota snapshot age.
+- `/commandcode-account-primary [account-id]` changes the preferred account.
+- `/commandcode-account-remove [account-id]` removes an account and its pool state.
+
+Pool requests prefer the primary account and silently try each other healthy account at most once when an eligible pre-content failure occurs (`408`, `429`, `5xx`, selected connection failures, or account-scoped authentication failures). A failed account enters a bounded cooldown; the request never waits for that cooldown or retries the same pool credential. Requests do not switch after content or tool-call execution has started. Recovery is automatic: an expiring cooldown is checked by a bounded background probe, and a verified recovery or successful primary request restores primary-first selection. Normal switching produces no notification or diagnostic.
+
+Pool credentials and credential-free coordination metadata live under `join(getAgentDir(), "commandcode")` (normally `~/.pi/agent/commandcode/`, or the configured host agent directory). The state directory and lock directory use `0700`; regular files use `0600`, and the directory is git-ignored. Existing pi/OMP auth files remain read-only. If shared coordination becomes unavailable, the provider continues with process-local cooldowns and reports a redacted degradation warning in `/commandcode-status` rather than silently claiming global coordination.
+
+Deleting the `commandcode` state directory while the extension is stopped removes the extension-managed pool and rolls generation back to the existing single-account environment/auth-file path; it does not modify or migrate host-owned auth files. Deletion also removes the stored pool credentials, so export or re-add accounts before using this as a rollback.
+
+With no pool, or with a valid empty pool, the original single-account path remains active: key precedence, retry behavior, events, errors, provider metadata, quota behavior, and host auth-file compatibility are unchanged.
 
 Set `CMD_ZDR=1` to send Command Code's documented `x-cmd-zdr: 1` zero-data-retention header. The legacy `COMMANDCODE_ZDR=1` alias remains supported.
 

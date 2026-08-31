@@ -1,59 +1,11 @@
 import { MAX_LABEL_LENGTH, type AccountStore, type AccountStoreSnapshot } from "./account-store.ts"
-// WU 5 introduces the shared coordination store; before then the service is
-// process-local and these types are structurally inlined so WU 2 stays coherent.
-type CoordinationFailureClass = "transient" | "rate-limit" | "account-auth"
-interface CoordinationCooldown {
-  readonly epoch: number
-  readonly failureClass: CoordinationFailureClass
-  readonly failedAt: number
-  readonly cooldownUntil: number
-  readonly nextProbeAt: number
-}
-interface CoordinationLease {
-  readonly nonce: string
-  readonly pid: number
-  readonly processStartedAt: number
-  readonly acquiredAt: number
-  readonly expiresAt: number
-  readonly cooldownEpoch: number
-  readonly fence: number
-}
-interface CoordinationSnapshot {
-  readonly format: string
-  readonly version: number
-  readonly revision: number
-  readonly cooldowns: Readonly<Record<string, CoordinationCooldown>>
-  readonly leases: Readonly<Record<string, CoordinationLease>>
-}
-interface CoordinationCooldownUpdate {
-  readonly failureClass: CoordinationFailureClass
-  readonly failedAt: number
-  readonly cooldownUntil: number
-  readonly nextProbeAt: number
-}
-type CoordinationProbeResult =
-  | { readonly kind: "available" }
-  | { readonly kind: "unavailable"; readonly update: CoordinationCooldownUpdate }
-  | { readonly kind: "unknown" }
-interface CoordinationStore {
-  load(): Promise<
-    | { readonly kind: "absent" }
-    | { readonly kind: "loaded"; readonly snapshot: CoordinationSnapshot }
-    | { readonly kind: "unavailable"; readonly reason: string }
-  >
-  recordCooldown(
-    accountId: string,
-    update: CoordinationCooldownUpdate,
-  ): Promise<CoordinationCooldown>
-  acquireProbe(accountId: string): Promise<CoordinationLease | undefined>
-  applyProbeResult(
-    accountId: string,
-    lease: CoordinationLease,
-    result: CoordinationProbeResult,
-  ): Promise<boolean>
-  releaseProbe(accountId: string, nonce: string): Promise<boolean>
-  pruneAccount(accountId: string): Promise<void>
-}
+import {
+  type CoordinationCooldown,
+  type CoordinationCooldownUpdate,
+  type CoordinationLease,
+  type CoordinationProbeResult,
+  type CoordinationStore,
+} from "./coordination.ts"
 import type { AcquiredCommandCodeAccount } from "./oauth.ts"
 import {
   createQuotaSnapshotCache,
@@ -65,21 +17,7 @@ import {
 } from "./quota.ts"
 import type { CommandCodeQuota, CommandCodeQuotaResult } from "./quota-types.ts"
 import { redactDiagnosticText } from "./runtime.ts"
-// WU 3 introduces the structured TransportFailure shape in types.ts; until then
-// the eligible-failure input structurally matches its future fields.
-type TransportFailureKind = "http" | "network" | "abort" | "stream" | "unknown"
-type TransportFailurePhase = "payload" | "request" | "response" | "stream"
-interface TransportFailure {
-  readonly source?: "generate" | "native"
-  readonly phase?: TransportFailurePhase
-  readonly kind?: TransportFailureKind
-  readonly status?: number
-  readonly retryAfterMs?: number
-  readonly providerCode?: string
-  readonly providerType?: string
-  readonly streamReason?: "upstream-connection" | "truncated"
-  readonly abortOrigin?: "caller" | "runtime-timeout" | "runtime-abort"
-}
+import type { TransportFailure } from "./types.ts"
 
 export type AccountMode =
   | { readonly kind: "legacy" }
@@ -440,7 +378,7 @@ export function createAccountService(options: AccountServiceOptions): AccountSer
     penalties.set(id, penalty)
   }
 
-  function mergeCoordination(snapshot: CoordinationSnapshot): void {
+  function mergeCoordination(snapshot: import("./coordination.ts").CoordinationSnapshot): void {
     const currentTime = now()
     for (const [id, cooldown] of Object.entries(snapshot.cooldowns) as Array<
       [string, CoordinationCooldown]
@@ -462,8 +400,7 @@ export function createAccountService(options: AccountServiceOptions): AccountSer
       const local = penalties.get(id)
       if (
         previousShared &&
-        local !== undefined &&
-        local.epoch === previousShared.epoch &&
+        local?.epoch === previousShared.epoch &&
         local.failedAt === previousShared.failedAt &&
         local.cooldownUntil === previousShared.cooldownUntil
       ) {
