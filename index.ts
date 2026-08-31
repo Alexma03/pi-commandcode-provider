@@ -15,6 +15,10 @@ import {
 } from "@earendil-works/pi-coding-agent"
 import { join } from "node:path"
 
+import { registerCommandCodeAccountCommands } from "./src/account-commands.ts"
+import { createAccountStore } from "./src/account-store.ts"
+import { createAccountService } from "./src/accounts.ts"
+import { createCoordinationStore } from "./src/coordination.ts"
 import { getConfiguredApiKey } from "./src/api-key.ts"
 import { createStreamCommandCode } from "./src/core.ts"
 import { calculateCommandCodeCost } from "./src/cost.ts"
@@ -34,8 +38,15 @@ import { getApiKey as getOAuthApiKey, login, refreshToken } from "./src/oauth.ts
 import { normalizeCommandCodeMessage } from "./src/overflow.ts"
 import { MODEL_COSTS, ZERO_MODEL_COST } from "./src/pricing.ts"
 import { registerCommandCodeQuota } from "./src/quota-command.ts"
-import { createCommandCodeRuntime } from "./src/runtime.ts"
-import { createCommandCodeTransportRouter } from "./src/transport.ts"
+import {
+  createAccountAwareStream,
+  createCommandCodeRuntime,
+  redactDiagnosticText,
+} from "./src/runtime.ts"
+import {
+  createCommandCodeTransportRegistry,
+  createCommandCodeTransportRouter,
+} from "./src/transport.ts"
 
 function commandCodeHeaders(): Record<string, string> | undefined {
   if (process.env.CMD_ZDR === "1" || process.env.COMMANDCODE_ZDR === "1") {
@@ -109,7 +120,7 @@ export default async function (pi: ExtensionAPI) {
     calculateCost: calculateCommandCodeCost,
     apiBase: legacyApiBase(apiBase),
   })
-  const transport = createCommandCodeTransportRouter({
+  const transportDependencies = {
     createStream: () => new AssistantMessageEventStream(),
     streamProvider: (model, context, options) =>
       streamNativeProvider(
@@ -118,6 +129,35 @@ export default async function (pi: ExtensionAPI) {
         options,
       ),
     streamGenerate,
+  }
+  const transport = createCommandCodeTransportRouter(transportDependencies)
+  const transportRegistry = createCommandCodeTransportRegistry(transportDependencies)
+
+  let coordinationWarning: string | undefined
+  const rememberCoordinationWarning = (message: string): void => {
+    coordinationWarning = redactDiagnosticText(message)
+  }
+  const accountStore = createAccountStore({ getAgentDir })
+  const coordination = createCoordinationStore({
+    stateDir: accountStore.stateRoot,
+    warning: rememberCoordinationWarning,
+  })
+  const accountService = createAccountService({
+    store: accountStore,
+    coordination,
+    warning: rememberCoordinationWarning,
+    apiBase: legacyApiBase(apiBase),
+    headers: commandCodeHeaders(),
+    pruneAccountState: async (id) => transportRegistry.reset(id),
+  })
+  const streamCommandCode = createAccountAwareStream({
+    accounts: accountService,
+    createStream: () => new AssistantMessageEventStream(),
+    streamLegacy: transport.stream,
+    streamAccount: (account, model, context, options) => {
+      if (!account) return transport.stream(model, context, options)
+      return transportRegistry.stream(account.id, model, context, options)
+    },
   })
 
   pi.on("message_end", async (event, ctx) => {
@@ -126,9 +166,12 @@ export default async function (pi: ExtensionAPI) {
     return normalized ? { message: normalized.message } : undefined
   })
 
+  registerCommandCodeAccountCommands(pi, { service: accountService })
+
   registerCommandCodeQuota(pi, {
     apiBase: legacyApiBase(apiBase),
     headers: commandCodeHeaders(),
+    accountService,
   })
 
   const runtime = createCommandCodeRuntime<ProviderConfig, ExtensionCommandContext>(pi, {
@@ -140,8 +183,14 @@ export default async function (pi: ExtensionAPI) {
         cachePath: modelsCachePath,
         timeoutMs: modelsTimeoutMs,
       }),
-    createProviderConfig: (models) => createProviderConfig(models, apiBase, transport.stream),
+    createProviderConfig: (models) => createProviderConfig(models, apiBase, streamCommandCode),
     getTransport: transport.getTransport,
+    accountService,
+    getCoordinationWarning: () => coordinationWarning,
+  })
+
+  pi.on("session_shutdown", async () => {
+    await runtime.shutdown()
   })
 
   await runtime.initialize()

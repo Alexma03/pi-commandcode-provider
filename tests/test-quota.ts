@@ -11,7 +11,10 @@ import { describe, it } from "node:test"
 import { formatQuota, formatWindowLimits } from "../src/quota-format.ts"
 import {
   DEFAULT_API_BASE,
+  createQuotaSnapshotCache,
   fetchCommandCodeQuota,
+  interpretAccountAvailability,
+  interpretQuotaAvailability,
   redactValue,
   windowLimitsFromCredits,
 } from "../src/quota.ts"
@@ -42,6 +45,134 @@ function okFetch(handlers: Record<string, unknown>) {
 }
 
 describe("Command Code quota", () => {
+  it("interprets only recognized positive credits or unexhausted numeric windows as available", () => {
+    const account = { login: "alice", orgId: null }
+    assert.equal(
+      interpretQuotaAvailability({
+        ok: true,
+        quota: {
+          account,
+          credits: {
+            monthlyCredits: 1,
+            purchasedCredits: 0,
+            freeCredits: 0,
+            remainingCredits: 1,
+            windowLimits: [],
+          },
+          subscription: null,
+          summary: null,
+        },
+      }),
+      "available",
+    )
+    assert.equal(
+      interpretQuotaAvailability({
+        ok: true,
+        quota: {
+          account,
+          credits: {
+            monthlyCredits: 0,
+            purchasedCredits: 0,
+            freeCredits: 0,
+            remainingCredits: 0,
+            windowLimits: [{ window: "fiveHour", used: 2, cap: 3, resetAt: null }],
+          },
+          subscription: null,
+          summary: null,
+        },
+      }),
+      "available",
+    )
+    assert.equal(
+      interpretQuotaAvailability({
+        ok: true,
+        quota: {
+          account,
+          credits: {
+            monthlyCredits: 0,
+            purchasedCredits: 0,
+            freeCredits: 0,
+            remainingCredits: 0,
+            windowLimits: [{ window: "fiveHour", used: 3, cap: 3, resetAt: null }],
+          },
+          subscription: null,
+          summary: null,
+        },
+      }),
+      "unavailable",
+    )
+    assert.equal(
+      interpretQuotaAvailability({
+        ok: true,
+        quota: { account, credits: null, subscription: null, summary: null },
+      }),
+      "unknown",
+    )
+    assert.equal(
+      interpretAccountAvailability({
+        ok: true,
+        quota: { account, credits: null, subscription: null, summary: null },
+      }),
+      "available",
+    )
+    assert.equal(
+      interpretQuotaAvailability({ ok: false, error: { kind: "network", message: "opaque" } }),
+      "unknown",
+    )
+  })
+
+  it("keeps normalized quota snapshots in an injected five-minute TTL cache", async () => {
+    const now = { value: 1_700_000_000_000 }
+    const cache = createQuotaSnapshotCache({ now: () => now.value })
+    const snapshot = {
+      account: { login: "alice", orgId: null },
+      credits: null,
+      subscription: null,
+      summary: { totalCost: 1, totalCount: 2 },
+    }
+    cache.set("11111111-1111-4111-8111-111111111111", snapshot)
+    assert.equal(cache.get("11111111-1111-4111-8111-111111111111")?.quota.summary?.totalCount, 2)
+    assert.equal(cache.age("11111111-1111-4111-8111-111111111111"), 0)
+    now.value += 5 * 60 * 1000
+    assert.equal(cache.getFresh("11111111-1111-4111-8111-111111111111"), undefined)
+    assert.equal(cache.age("11111111-1111-4111-8111-111111111111"), 5 * 60 * 1000)
+
+    const fetchImpl = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input)
+      if (url.includes("whoami")) return jsonResponse({ user: { userName: "alice" }, org: null })
+      if (url.includes("credits")) return jsonResponse({ credits: { monthlyCredits: 5 } })
+      if (url.includes("subscriptions")) return jsonResponse({ data: { planId: "pro" } })
+      return jsonResponse({ totalCost: 1, totalCount: 1 })
+    }
+    const result = await fetchCommandCodeQuota({
+      apiKey: "cc_test_key",
+      fetchImpl,
+      cache,
+      cacheKey: "11111111-1111-4111-8111-111111111111",
+      now: () => now.value,
+    })
+    assert.equal(result.ok, true)
+    assert.equal(cache.get("11111111-1111-4111-8111-111111111111")?.quota.summary?.totalCount, 1)
+    assert.equal(cache.age("11111111-1111-4111-8111-111111111111"), 0)
+  })
+  it("uses recognized whoami alone for auth recovery probes", async () => {
+    const urls: string[] = []
+    const result = await fetchCommandCodeQuota({
+      apiKey: "cc_test_account_only",
+      accountOnly: true,
+      fetchImpl: async (input) => {
+        const url = String(input)
+        urls.push(url)
+        assert.match(url, /\/alpha\/whoami$/)
+        return jsonResponse({ user: { userName: "alice" }, org: { id: "org_1" } })
+      },
+    })
+    assert.equal(result.ok, true)
+    assert.deepEqual(urls, [`${DEFAULT_API_BASE}/alpha/whoami`])
+    assert.equal(interpretAccountAvailability(result), "available")
+    assert.equal(interpretQuotaAvailability(result), "unknown")
+  })
+
   it("parses window limits from the credits windowLimits object", () => {
     const limits = windowLimitsFromCredits({
       limited: true,

@@ -1,6 +1,7 @@
 import { redactCommandCodeErrorText } from "./overflow.ts"
 import type {
   CommandCodeCredits,
+  CommandCodeQuota,
   CommandCodeQuotaResult,
   CommandCodeQuotaSection,
   CommandCodeSubscription,
@@ -11,12 +12,128 @@ import type {
 export const DEFAULT_API_BASE = "https://api.commandcode.ai"
 export const QUOTA_TIMEOUT_MS = 15_000
 
-interface FetchOptions {
+export const QUOTA_SNAPSHOT_TTL_MS = 5 * 60_000
+
+export type QuotaAvailability = "available" | "unavailable" | "unknown"
+
+export interface QuotaSnapshot {
+  readonly quota: CommandCodeQuota
+  readonly fetchedAt: number
+}
+
+export interface QuotaSnapshotCache {
+  get(accountId: string): QuotaSnapshot | undefined
+  getFresh(accountId: string): QuotaSnapshot | undefined
+  age(accountId: string): number | undefined
+  set(accountId: string, quota: CommandCodeQuota, fetchedAt?: number): void
+  clear(accountId: string): void
+}
+
+export interface QuotaSnapshotCacheOptions {
+  readonly now?: () => number
+  readonly ttlMs?: number
+}
+
+export function createQuotaSnapshotCache(
+  options: QuotaSnapshotCacheOptions = {},
+): QuotaSnapshotCache {
+  const now = options.now ?? Date.now
+  const ttlMs = Math.max(0, options.ttlMs ?? QUOTA_SNAPSHOT_TTL_MS)
+  const snapshots = new Map<string, QuotaSnapshot>()
+
+  const age = (accountId: string): number | undefined => {
+    const snapshot = snapshots.get(accountId)
+    return snapshot ? Math.max(0, now() - snapshot.fetchedAt) : undefined
+  }
+
+  return {
+    get(accountId) {
+      return snapshots.get(accountId)
+    },
+    getFresh(accountId) {
+      const snapshot = snapshots.get(accountId)
+      return snapshot && Math.max(0, now() - snapshot.fetchedAt) < ttlMs ? snapshot : undefined
+    },
+    age,
+    set(accountId, quota, fetchedAt = now()) {
+      if (!accountId || !Number.isFinite(fetchedAt) || fetchedAt < 0) return
+      snapshots.set(accountId, { quota, fetchedAt })
+    },
+    clear(accountId) {
+      snapshots.delete(accountId)
+    },
+  }
+}
+
+function quotaFromResult(value: unknown): CommandCodeQuota | undefined {
+  if (!isRecord(value)) return undefined
+  if (value.ok === true && isRecord(value.quota)) return value.quota as unknown as CommandCodeQuota
+  if ("account" in value && isRecord(value.account)) return value as unknown as CommandCodeQuota
+  return undefined
+}
+
+function recognizedQuotaAccount(value: CommandCodeQuota): boolean {
+  return (
+    isRecord(value.account) &&
+    typeof value.account.login === "string" &&
+    value.account.login.length > 0
+  )
+}
+
+export function interpretQuotaAvailability(value: unknown): QuotaAvailability {
+  const quota = quotaFromResult(value)
+  if (!quota || !recognizedQuotaAccount(quota)) return "unknown"
+  const credits = quota.credits
+  if (!isRecord(credits)) return "unknown"
+
+  const remaining = numberValue(credits.remainingCredits)
+  const windows = Array.isArray(credits.windowLimits)
+    ? credits.windowLimits.filter(
+        (window) =>
+          isRecord(window) &&
+          numberValue(window.used) !== undefined &&
+          numberValue(window.cap) !== undefined,
+      )
+    : []
+  if (remaining !== undefined && remaining > 0) return "available"
+  if (
+    windows.some(
+      (window) =>
+        isRecord(window) &&
+        (numberValue(window.used) as number) < (numberValue(window.cap) as number),
+    )
+  ) {
+    return "available"
+  }
+  if (remaining !== undefined || windows.length > 0) return "unavailable"
+  return "unknown"
+}
+
+export function interpretAccountAvailability(value: unknown): QuotaAvailability {
+  const quota = quotaFromResult(value)
+  return quota && recognizedQuotaAccount(quota) ? "available" : "unknown"
+}
+
+export function interpretCommandCodeAvailability(
+  value: unknown,
+  failureClass: "transient" | "rate-limit" | "account-auth" = "rate-limit",
+): QuotaAvailability {
+  return failureClass === "rate-limit"
+    ? interpretQuotaAvailability(value)
+    : interpretAccountAvailability(value)
+}
+
+export interface FetchOptions {
   apiKey: string
   baseUrl?: string
   fetchImpl?: typeof fetch
   timeoutMs?: number
   extraHeaders?: Record<string, string>
+  cache?: QuotaSnapshotCache
+  cacheKey?: string
+  now?: () => number
+  /** Stop after validated identity; used by auth/transient recovery probes. */
+  accountOnly?: boolean
 }
 
 interface HttpErrorShape {
@@ -120,20 +237,38 @@ function parseSummary(value: unknown): CommandCodeUsageSummary | null {
   return { totalCost, totalCount, ...(totalTokens === undefined ? {} : { totalTokens }) }
 }
 
-function parseWhoami(value: unknown): {
-  login: string
-  orgId: string | null
-  keyName?: string
-} | null {
+export interface CommandCodeIdentity {
+  readonly login: string
+  readonly orgId: string | null
+  readonly keyName?: string
+}
+
+function normalizedIdentityString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const normalized = Array.from(value)
+    .filter((character) => {
+      const code = character.charCodeAt(0)
+      return code > 31 && code !== 127
+    })
+    .join("")
+    .trim()
+  return normalized.length > 0 ? normalized : undefined
+}
+
+export function commandCodeIdentityFromWhoami(value: unknown): CommandCodeIdentity | null {
   if (!isRecord(value)) return null
   const org = isRecord(value.org) ? value.org : undefined
   const user = isRecord(value.user) ? value.user : undefined
   const login =
-    (org ? stringValue(org.login) : undefined) ??
-    (user ? (stringValue(user.userName) ?? stringValue(user.name)) : undefined)
+    (org ? normalizedIdentityString(org.login) : undefined) ??
+    (user
+      ? (normalizedIdentityString(user.userName) ?? normalizedIdentityString(user.name))
+      : undefined)
   if (!login) return null
-  const orgId = org ? stringValue(org.id) : undefined
-  const keyName = user ? (stringValue(user.keyName) ?? stringValue(user.displayName)) : undefined
+  const orgId = org ? normalizedIdentityString(org.id) : undefined
+  const keyName = user
+    ? (normalizedIdentityString(user.keyName) ?? normalizedIdentityString(user.displayName))
+    : undefined
   return { login, orgId: orgId ?? null, ...(keyName ? { keyName } : {}) }
 }
 
@@ -241,12 +376,26 @@ export async function fetchCommandCodeQuota(
   try {
     const whoamiRaw = await request("/alpha/whoami")
     if (isHttpError(whoamiRaw)) return httpFailure(whoamiRaw, "whoami")
-    const account = parseWhoami(whoamiRaw)
+    const account = commandCodeIdentityFromWhoami(whoamiRaw)
     if (!account) {
       return {
         ok: false,
         error: { kind: "http", message: "Command Code returned an unrecognized account response" },
       }
+    }
+
+    if (options.accountOnly) {
+      const quota: CommandCodeQuota = {
+        account,
+        credits: null,
+        subscription: null,
+        summary: null,
+        unavailable: ["credits", "subscription", "usage"],
+      }
+      if (options.cache && options.cacheKey) {
+        options.cache.set(options.cacheKey, quota, options.now?.())
+      }
+      return { ok: true, quota }
     }
 
     const orgId = account.orgId ?? undefined
@@ -296,16 +445,17 @@ export async function fetchCommandCodeQuota(
       }
     }
 
-    return {
-      ok: true,
-      quota: {
-        account,
-        credits,
-        subscription,
-        summary,
-        ...(unavailable.length > 0 ? { unavailable } : {}),
-      },
+    const quota: CommandCodeQuota = {
+      account,
+      credits,
+      subscription,
+      summary,
+      ...(unavailable.length > 0 ? { unavailable } : {}),
     }
+    if (options.cache && options.cacheKey) {
+      options.cache.set(options.cacheKey, quota, options.now?.())
+    }
+    return { ok: true, quota }
   } catch (error) {
     if (error instanceof QuotaTimeoutError || overallController.signal.aborted) {
       return {
